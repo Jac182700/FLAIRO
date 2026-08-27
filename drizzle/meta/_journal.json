@@ -15,6 +15,13 @@
       "when": 1787832021293,
       "tag": "0001_safe_masque",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787837809348,
+      "tag": "0002_messy_hercules",
+      "breakpoints": true
     }
   ]
 }

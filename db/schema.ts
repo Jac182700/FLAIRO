@@ -127,6 +127,8 @@ export const jobOrders = sqliteTable(
     serviceDate: text('service_date'),
     scheduleConfirmedAt: text('schedule_confirmed_at'),
     vendorConfirmedAt: text('vendor_confirmed_at'),
+    claimedAt: text('claimed_at'),
+    scheduleDueAt: text('schedule_due_at'),
     paymentConsultStatus: text('payment_consult_status').notNull().default('not_started'),
     residentPaidVendor: integer('resident_paid_vendor', { mode: 'boolean' }).notNull().default(false),
     serviceAmountCents: integer('service_amount_cents').notNull(),

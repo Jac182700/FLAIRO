@@ -74,6 +74,10 @@ type Job = {
   service: string;
   preferredWindow: string;
   serviceDate: string;
+  requestedAt: string;
+  claimedAt: string | null;
+  scheduleDueAt: string | null;
+  scheduledAt: string | null;
   amount: number;
   flairoFee: number;
   points: number;
@@ -171,6 +175,13 @@ const navSections: Array<{ id: ModuleId; label: string }> = [
   { id: 'reports', label: 'Community Reports' },
   { id: 'settings', label: 'Settings' },
 ];
+
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+
+function relativeIso(hoursOffset: number) {
+  return new Date(Date.now() + hoursOffset * HOUR_MS).toISOString();
+}
 
 const initialServices: Service[] = [
   {
@@ -361,6 +372,10 @@ const initialJobs: Job[] = [
     service: 'Recurring housekeeping',
     preferredWindow: 'Fri morning',
     serviceDate: '2026-09-04',
+    requestedAt: relativeIso(-8),
+    claimedAt: relativeIso(-3),
+    scheduleDueAt: relativeIso(21),
+    scheduledAt: null,
     amount: 149,
     flairoFee: 14.9,
     points: 498,
@@ -384,6 +399,10 @@ const initialJobs: Job[] = [
     service: 'Move-out deep cleaning',
     preferredWindow: 'Any weekday',
     serviceDate: '2026-09-02',
+    requestedAt: relativeIso(-6.35),
+    claimedAt: null,
+    scheduleDueAt: null,
+    scheduledAt: null,
     amount: 245,
     flairoFee: 24.5,
     points: 370,
@@ -407,6 +426,10 @@ const initialJobs: Job[] = [
     service: 'Dog walking and drop-ins',
     preferredWindow: 'Mon and Wed lunch',
     serviceDate: '2026-08-31',
+    requestedAt: relativeIso(-52),
+    claimedAt: relativeIso(-47),
+    scheduleDueAt: relativeIso(-23),
+    scheduledAt: relativeIso(-36),
     amount: 27,
     flairoFee: 2.7,
     points: 74,
@@ -430,6 +453,10 @@ const initialJobs: Job[] = [
     service: 'Preferred movers',
     preferredWindow: 'Sept 12 afternoon',
     serviceDate: '2026-09-12',
+    requestedAt: relativeIso(-2.25),
+    claimedAt: null,
+    scheduleDueAt: null,
+    scheduledAt: null,
     amount: 325,
     flairoFee: 32.5,
     points: 475,
@@ -578,6 +605,7 @@ export default function ControlCenter({
   const [mobileSync, setMobileSync] = useState<MobileSync>(initialMobileSync);
   const [syncStatus, setSyncStatus] = useState('Checking live app bridge');
   const [mobilePushStatus, setMobilePushStatus] = useState('Push to mobile app');
+  const [clock, setClock] = useState(() => Date.now());
 
   const applyServerState = (state: Partial<FlairoState>) => {
     if (state.audit) setAudit(state.audit);
@@ -623,6 +651,11 @@ export default function ControlCenter({
       active = false;
       if (timer) clearInterval(timer);
     };
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => setClock(Date.now()), MINUTE_MS);
+    return () => clearInterval(timer);
   }, []);
 
   const persistAction = async (action: string, payload: Record<string, string>) => {
@@ -733,6 +766,8 @@ export default function ControlCenter({
   const claimJob = (jobId: string) => {
     const job = jobs.find((item) => item.id === jobId);
     if (!job) return;
+    const claimedAt = new Date().toISOString();
+    const scheduleDueAt = addHours(claimedAt, 24);
     const match = vendors.find(
       (vendor) =>
         vendor.boardAccess &&
@@ -751,6 +786,8 @@ export default function ControlCenter({
               ...item,
               vendorId: match.id,
               boardStatus: 'Claimed',
+              claimedAt,
+              scheduleDueAt,
               visibleToVendors: false,
               residentInfoReleased: true,
               paymentConsult: 'Resident contact released; vendor to schedule and consult on payment',
@@ -763,12 +800,14 @@ export default function ControlCenter({
   };
 
   const confirmSchedule = (jobId: string) => {
+    const scheduledAt = new Date().toISOString();
     setJobs((current) =>
       current.map((job) =>
         job.id === jobId
           ? {
               ...job,
               boardStatus: 'Scheduled',
+              scheduledAt,
               vendorConfirmed: true,
               paymentConsult: 'Resident and vendor confirmed direct payment plan',
             }
@@ -975,6 +1014,7 @@ export default function ControlCenter({
             communities={communities}
             invoices={invoices}
             jobs={jobs}
+            clock={clock}
             metrics={metrics}
             openInvoices={() => setActiveModule('invoices')}
             rewards={rewards}
@@ -1002,6 +1042,7 @@ export default function ControlCenter({
           <JobBoardModule
             claimJob={claimJob}
             communities={communities}
+            clock={clock}
             jobs={jobs}
             vendors={vendors}
           />
@@ -1012,6 +1053,7 @@ export default function ControlCenter({
             communities={communities}
             completeJob={completeJob}
             confirmSchedule={confirmSchedule}
+            clock={clock}
             jobs={jobs}
             triggerInvoice={triggerInvoice}
             vendors={vendors}
@@ -1048,6 +1090,7 @@ export default function ControlCenter({
 }
 
 function CommandModule({
+  clock,
   communities,
   invoices,
   jobs,
@@ -1056,6 +1099,7 @@ function CommandModule({
   rewards,
   vendors,
 }: {
+  clock: number;
   communities: Community[];
   invoices: InvoiceTrigger[];
   jobs: Job[];
@@ -1095,7 +1139,7 @@ function CommandModule({
         job.id,
         job.service,
         `${communityName(job.communityId, communities)} / ${job.market}`,
-        `${job.preferredWindow} / ${dollars(job.amount)}`,
+        `${getJobTimer(job, clock).value} unclaimed / ${job.preferredWindow}`,
       ]),
     },
     {
@@ -1154,7 +1198,7 @@ function CommandModule({
         job.id,
         job.boardStatus,
         job.vendorId ? vendorName(job.vendorId, vendors) : 'Unclaimed',
-        job.invoiceStatus,
+        `${getJobTimer(job, clock).label}: ${getJobTimer(job, clock).value}`,
       ]),
     },
     {
@@ -1450,11 +1494,13 @@ function VendorsModule({
 
 function JobBoardModule({
   claimJob,
+  clock,
   communities,
   jobs,
   vendors,
 }: {
   claimJob: (jobId: string) => void;
+  clock: number;
   communities: Community[];
   jobs: Job[];
   vendors: Vendor[];
@@ -1477,6 +1523,7 @@ function JobBoardModule({
 
       <section className="job-grid">
         {boardJobs.map((job) => {
+          const timer = getJobTimer(job, clock);
           const matches = vendors.filter(
             (vendor) =>
               vendor.boardAccess &&
@@ -1497,6 +1544,7 @@ function JobBoardModule({
                 <span>{dollars(job.amount)}</span>
                 <span>{job.points} pts</span>
               </div>
+              <JobTimer timer={timer} />
               <div className="matched-vendors">
                 <p className="eyebrow">Eligible vendors</p>
                 {matches.length ? matches.map((vendor) => <span key={vendor.id}>{vendor.name}</span>) : <span>No compliant match</span>}
@@ -1508,42 +1556,12 @@ function JobBoardModule({
           );
         })}
       </section>
-
-      <section className="table-panel">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Claim behavior</p>
-            <h2>Claimed work leaves the vendor board</h2>
-          </div>
-        </div>
-        <div className="compact-table">
-          <div className="compact-row header">
-            <span>Rule</span>
-            <span>Vendor portal</span>
-            <span>FLAIRO employees</span>
-          </div>
-          <div className="compact-row">
-            <span>Before claim</span>
-            <span>Visible by service area and compliance</span>
-            <span>Visible in board and tasks</span>
-          </div>
-          <div className="compact-row">
-            <span>After claim</span>
-            <span>Hidden from other vendors</span>
-            <span>Visible in open task control</span>
-          </div>
-          <div className="compact-row">
-            <span>Resident info</span>
-            <span>Released only to claiming vendor</span>
-            <span>Visible for oversight and support</span>
-          </div>
-        </div>
-      </section>
     </>
   );
 }
 
 function OpenTasksModule({
+  clock,
   communities,
   completeJob,
   confirmSchedule,
@@ -1551,6 +1569,7 @@ function OpenTasksModule({
   triggerInvoice,
   vendors,
 }: {
+  clock: number;
   communities: Community[];
   completeJob: (jobId: string) => void;
   confirmSchedule: (jobId: string) => void;
@@ -1569,7 +1588,9 @@ function OpenTasksModule({
       </div>
 
       <div className="task-stack">
-        {jobs.map((job) => (
+        {jobs.map((job) => {
+          const timer = getJobTimer(job, clock);
+          return (
           <article className="task-card" key={job.id}>
             <div className="task-main">
               <div>
@@ -1586,6 +1607,7 @@ function OpenTasksModule({
             </div>
 
             <div className="task-grid">
+              <InfoTile label={timer.label} value={`${timer.value} / ${timer.detail}`} />
               <InfoTile label="Vendor" value={job.vendorId ? vendorName(job.vendorId, vendors) : 'Unclaimed'} />
               <InfoTile label="Resident contact" value={job.residentInfoReleased ? `${job.resident} / ${job.phone}` : 'Hidden until claim'} />
               <InfoTile label="Vendor confirmation" value={job.vendorConfirmed ? 'Confirmed' : 'Needed'} />
@@ -1606,7 +1628,8 @@ function OpenTasksModule({
               </button>
             </div>
           </article>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
@@ -2076,6 +2099,16 @@ function DocumentTile({ label, status }: { label: string; status: DocumentStatus
   );
 }
 
+function JobTimer({ timer }: { timer: ReturnType<typeof getJobTimer> }) {
+  return (
+    <div className={`job-timer ${timer.tone}`}>
+      <span>{timer.label}</span>
+      <strong>{timer.value}</strong>
+      <em>{timer.detail}</em>
+    </div>
+  );
+}
+
 function InfoTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="info-tile">
@@ -2096,6 +2129,77 @@ function StatusPill({ label, status }: { label: string; status: string }) {
 
 function moduleTitle(activeModule: ModuleId) {
   return navSections.find((section) => section.id === activeModule)?.label ?? 'Command';
+}
+
+function addHours(isoDate: string, hours: number) {
+  const timestamp = Date.parse(isoDate);
+  const base = Number.isNaN(timestamp) ? Date.now() : timestamp;
+  return new Date(base + hours * HOUR_MS).toISOString();
+}
+
+function getJobTimer(job: Job, clock: number) {
+  const requestedAt = parseTimestamp(job.requestedAt, clock);
+  const claimedAt = job.claimedAt ? parseTimestamp(job.claimedAt, clock) : null;
+  const scheduledAt = job.scheduledAt ? parseTimestamp(job.scheduledAt, clock) : null;
+  const scheduleDueAt = job.scheduleDueAt ? parseTimestamp(job.scheduleDueAt, clock) : claimedAt ? claimedAt + 24 * HOUR_MS : null;
+
+  if (job.boardStatus === 'Open') {
+    return {
+      detail: 'since resident request',
+      label: 'Open unclaimed',
+      tone: 'open',
+      value: formatDuration(clock - requestedAt),
+    };
+  }
+
+  if (job.boardStatus === 'Claimed') {
+    const startedAt = claimedAt ?? requestedAt;
+    const dueText = scheduleDueAt && scheduleDueAt > clock
+      ? `${formatDuration(scheduleDueAt - clock)} left`
+      : 'Schedule due now';
+
+    return {
+      detail: dueText,
+      label: 'Schedule timer',
+      tone: scheduleDueAt && scheduleDueAt <= clock ? 'late' : 'claimed',
+      value: formatDuration(clock - startedAt),
+    };
+  }
+
+  if (job.boardStatus === 'Scheduled') {
+    const startedAt = claimedAt ?? requestedAt;
+    const stoppedAt = scheduledAt ?? startedAt;
+
+    return {
+      detail: 'claim to schedule',
+      label: 'Scheduled in',
+      tone: 'done',
+      value: formatDuration(stoppedAt - startedAt),
+    };
+  }
+
+  return {
+    detail: 'finalized',
+    label: 'Completed',
+    tone: 'done',
+    value: job.scheduledAt ? formatDuration(clock - parseTimestamp(job.scheduledAt, clock)) : 'Done',
+  };
+}
+
+function parseTimestamp(value: string | null | undefined, fallback: number) {
+  const timestamp = value ? Date.parse(value) : Number.NaN;
+  return Number.isNaN(timestamp) ? fallback : timestamp;
+}
+
+function formatDuration(milliseconds: number) {
+  const totalMinutes = Math.max(0, Math.floor(milliseconds / MINUTE_MS));
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }
 
 function buildVendorMonthRows(jobs: Job[], vendors: Vendor[], monthKey: string): VendorMonthRow[] {
