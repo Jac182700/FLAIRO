@@ -1,0 +1,1709 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+
+type ModuleId =
+  | 'command'
+  | 'mobile'
+  | 'vendors'
+  | 'board'
+  | 'tasks'
+  | 'rewards'
+  | 'invoices'
+  | 'reports'
+  | 'settings';
+
+type VendorStatus = 'Compliant' | 'Review needed' | 'Pending onboarding';
+type DocumentStatus = 'Verified' | 'Under review' | 'Needs upload' | 'Expiring';
+type BoardStatus = 'Open' | 'Claimed' | 'Scheduled' | 'Completed';
+type InvoiceStatus = 'Waiting' | 'Ready' | 'Draft queued' | 'Sent' | 'Hold';
+type StatementStatus = 'Draft' | 'Ready' | 'Issued';
+
+type Service = {
+  id: string;
+  name: string;
+  category: string;
+  standardPrice: number;
+  plusPrice: number;
+  mobileVisible: boolean;
+  pointsRule: string;
+  vendorPoolRule: string;
+};
+
+type Community = {
+  id: string;
+  name: string;
+  market: string;
+  address: string;
+  manager: string;
+  homes: number;
+  occupied: number;
+  plusMembers: number;
+  servicePenetration: number;
+  netIncome: number;
+  statementStatus: StatementStatus;
+};
+
+type Vendor = {
+  id: string;
+  name: string;
+  contact: string;
+  email: string;
+  phone: string;
+  markets: string[];
+  services: string[];
+  status: VendorStatus;
+  boardAccess: boolean;
+  insurance: DocumentStatus;
+  license: DocumentStatus;
+  w9: DocumentStatus;
+  feePercent: number;
+  stage: string;
+  rating: number;
+};
+
+type Job = {
+  id: string;
+  resident: string;
+  phone: string;
+  email: string;
+  communityId: string;
+  market: string;
+  unit: string;
+  homeProfile: string;
+  service: string;
+  preferredWindow: string;
+  serviceDate: string;
+  amount: number;
+  flairoFee: number;
+  points: number;
+  vendorId: string | null;
+  boardStatus: BoardStatus;
+  visibleToVendors: boolean;
+  residentInfoReleased: boolean;
+  vendorConfirmed: boolean;
+  paymentConsult: string;
+  invoiceStatus: InvoiceStatus;
+};
+
+type RewardEntry = {
+  id: string;
+  resident: string;
+  communityId: string;
+  source: string;
+  status: 'Pending' | 'Available' | 'Redeemed' | 'Reversed' | 'Expired';
+  points: number;
+  value: number;
+  note: string;
+};
+
+type InvoiceTrigger = {
+  id: string;
+  jobId: string;
+  vendorId: string;
+  amount: number;
+  status: InvoiceStatus;
+  dueDate: string;
+  reference: string;
+};
+
+type AuditEntry = {
+  id: string;
+  action: string;
+  detail: string;
+  time: string;
+};
+
+type FlairoState = {
+  audit: AuditEntry[];
+  communities: Community[];
+  invoices: InvoiceTrigger[];
+  jobs: Job[];
+  rewards: RewardEntry[];
+  services: Service[];
+  vendors: Vendor[];
+};
+
+const navSections: Array<{ id: ModuleId; label: string; tag: string }> = [
+  { id: 'command', label: 'Command', tag: 'Today' },
+  { id: 'mobile', label: 'Mobile Controls', tag: 'App' },
+  { id: 'vendors', label: 'Vendors', tag: 'CRM' },
+  { id: 'board', label: 'Job Board', tag: 'Pool' },
+  { id: 'tasks', label: 'Open Tasks', tag: 'Orders' },
+  { id: 'rewards', label: 'Rewards', tag: 'Points' },
+  { id: 'invoices', label: 'Invoices', tag: 'Bluevine' },
+  { id: 'reports', label: 'Community Reports', tag: 'Finance' },
+  { id: 'settings', label: 'Settings', tag: 'Rules' },
+];
+
+const initialServices: Service[] = [
+  {
+    id: 'recurring-housekeeping',
+    name: 'Recurring housekeeping',
+    category: 'Home Care',
+    standardPrice: 185,
+    plusPrice: 149,
+    mobileVisible: true,
+    pointsRule: '1x free, 2x PLUS, 100/200 completion bonus',
+    vendorPoolRule: 'Compliant cleaning vendors by market',
+  },
+  {
+    id: 'move-out-deep-cleaning',
+    name: 'Move-out deep cleaning',
+    category: 'Move-out',
+    standardPrice: 245,
+    plusPrice: 215,
+    mobileVisible: true,
+    pointsRule: '125/250 completion bonus',
+    vendorPoolRule: 'Cleaning vendors with turnover access',
+  },
+  {
+    id: 'pet-care',
+    name: 'Dog walking and drop-ins',
+    category: 'Pet Care',
+    standardPrice: 32,
+    plusPrice: 27,
+    mobileVisible: true,
+    pointsRule: 'Recurring eligible, low-cost visit bonus',
+    vendorPoolRule: 'Pet vendors with active license',
+  },
+  {
+    id: 'preferred-movers',
+    name: 'Preferred movers',
+    category: 'Moving',
+    standardPrice: 325,
+    plusPrice: 299,
+    mobileVisible: true,
+    pointsRule: '150/300 completion bonus',
+    vendorPoolRule: 'Moving vendors by ZIP and availability',
+  },
+  {
+    id: 'handyman-work',
+    name: 'Handyman work',
+    category: 'Home Care',
+    standardPrice: 125,
+    plusPrice: 110,
+    mobileVisible: true,
+    pointsRule: '50/100 completion bonus',
+    vendorPoolRule: 'Home services vendors by task type',
+  },
+  {
+    id: 'touch-up-painting',
+    name: 'Move-out touch-up painting',
+    category: 'Move-out',
+    standardPrice: 225,
+    plusPrice: 195,
+    mobileVisible: false,
+    pointsRule: '100/200 completion bonus',
+    vendorPoolRule: 'Paint vendors with estimate approval',
+  },
+];
+
+const initialCommunities: Community[] = [
+  {
+    id: 'arbor',
+    name: 'The Arbor on 7th',
+    market: 'Fort Lauderdale, FL',
+    address: '701 NE 7th Ave',
+    manager: 'RISE Residential Management',
+    homes: 214,
+    occupied: 202,
+    plusMembers: 48,
+    servicePenetration: 36,
+    netIncome: 1840,
+    statementStatus: 'Ready',
+  },
+  {
+    id: 'solara',
+    name: 'Solara Midtown',
+    market: 'Miami, FL',
+    address: '1880 Midtown Blvd',
+    manager: 'RISE Residential Management',
+    homes: 288,
+    occupied: 270,
+    plusMembers: 61,
+    servicePenetration: 31,
+    netIncome: 2265,
+    statementStatus: 'Draft',
+  },
+  {
+    id: 'sawgrass',
+    name: 'The Reserve at Sawgrass',
+    market: 'Sunrise, FL',
+    address: '1420 Sawgrass Parkway',
+    manager: 'RISE Residential Management',
+    homes: 312,
+    occupied: 297,
+    plusMembers: 73,
+    servicePenetration: 44,
+    netIncome: 2659.76,
+    statementStatus: 'Issued',
+  },
+];
+
+const initialVendors: Vendor[] = [
+  {
+    id: 'sparkle',
+    name: 'Sparkle & Settle Cleaning Co.',
+    contact: 'Elena Martinez',
+    email: 'operations@sparklesettle.example',
+    phone: '(305) 555-0181',
+    markets: ['Fort Lauderdale, FL', 'Sunrise, FL'],
+    services: ['Recurring housekeeping', 'Move-out deep cleaning'],
+    status: 'Compliant',
+    boardAccess: true,
+    insurance: 'Verified',
+    license: 'Verified',
+    w9: 'Verified',
+    feePercent: 10,
+    stage: 'Board access active',
+    rating: 4.8,
+  },
+  {
+    id: 'pink-palm',
+    name: 'Pink Palm Pet Care',
+    contact: 'Jordan Ellis',
+    email: 'hello@pinkpalmpet.example',
+    phone: '(954) 555-0174',
+    markets: ['Fort Lauderdale, FL'],
+    services: ['Dog walking and drop-ins'],
+    status: 'Review needed',
+    boardAccess: false,
+    insurance: 'Expiring',
+    license: 'Verified',
+    w9: 'Verified',
+    feePercent: 10,
+    stage: 'Insurance renewal review',
+    rating: 4.7,
+  },
+  {
+    id: 'porter',
+    name: 'Porter Preferred Movers',
+    contact: 'Andre Collins',
+    email: 'dispatch@porterpreferred.example',
+    phone: '(786) 555-0142',
+    markets: ['Miami, FL', 'Sunrise, FL'],
+    services: ['Preferred movers'],
+    status: 'Pending onboarding',
+    boardAccess: false,
+    insurance: 'Under review',
+    license: 'Needs upload',
+    w9: 'Verified',
+    feePercent: 10,
+    stage: 'License upload needed',
+    rating: 4.5,
+  },
+  {
+    id: 'hex-key',
+    name: 'Hex Key Home Services',
+    contact: 'Nina Patel',
+    email: 'jobs@hexkeyhome.example',
+    phone: '(561) 555-0126',
+    markets: ['Miami, FL', 'Fort Lauderdale, FL'],
+    services: ['Handyman work', 'Move-out touch-up painting'],
+    status: 'Compliant',
+    boardAccess: true,
+    insurance: 'Verified',
+    license: 'Verified',
+    w9: 'Verified',
+    feePercent: 10,
+    stage: 'Board access active',
+    rating: 4.6,
+  },
+];
+
+const initialJobs: Job[] = [
+  {
+    id: 'J-1048',
+    resident: 'Maya Chen',
+    phone: '(305) 555-0199',
+    email: 'maya.chen@example.com',
+    communityId: 'arbor',
+    market: 'Fort Lauderdale, FL',
+    unit: '4B',
+    homeProfile: '2BR / 2BA',
+    service: 'Recurring housekeeping',
+    preferredWindow: 'Fri morning',
+    serviceDate: '2026-09-04',
+    amount: 149,
+    flairoFee: 14.9,
+    points: 498,
+    vendorId: 'sparkle',
+    boardStatus: 'Claimed',
+    visibleToVendors: false,
+    residentInfoReleased: true,
+    vendorConfirmed: false,
+    paymentConsult: 'Vendor to confirm resident payment method',
+    invoiceStatus: 'Waiting',
+  },
+  {
+    id: 'J-1049',
+    resident: 'Chris Walker',
+    phone: '(786) 555-0108',
+    email: 'chris.walker@example.com',
+    communityId: 'solara',
+    market: 'Miami, FL',
+    unit: '1208',
+    homeProfile: '1BR / 1BA',
+    service: 'Move-out deep cleaning',
+    preferredWindow: 'Any weekday',
+    serviceDate: '2026-09-02',
+    amount: 245,
+    flairoFee: 24.5,
+    points: 370,
+    vendorId: null,
+    boardStatus: 'Open',
+    visibleToVendors: true,
+    residentInfoReleased: false,
+    vendorConfirmed: false,
+    paymentConsult: 'Not started',
+    invoiceStatus: 'Waiting',
+  },
+  {
+    id: 'J-1050',
+    resident: 'Avery Brooks',
+    phone: '(954) 555-0162',
+    email: 'avery.brooks@example.com',
+    communityId: 'arbor',
+    market: 'Fort Lauderdale, FL',
+    unit: '8C',
+    homeProfile: 'Pet service',
+    service: 'Dog walking and drop-ins',
+    preferredWindow: 'Mon and Wed lunch',
+    serviceDate: '2026-08-31',
+    amount: 27,
+    flairoFee: 2.7,
+    points: 74,
+    vendorId: 'pink-palm',
+    boardStatus: 'Scheduled',
+    visibleToVendors: false,
+    residentInfoReleased: true,
+    vendorConfirmed: true,
+    paymentConsult: 'Resident and vendor confirmed direct payment',
+    invoiceStatus: 'Ready',
+  },
+  {
+    id: 'J-1051',
+    resident: 'Daniel Ruiz',
+    phone: '(561) 555-0137',
+    email: 'daniel.ruiz@example.com',
+    communityId: 'sawgrass',
+    market: 'Sunrise, FL',
+    unit: '2304',
+    homeProfile: '3BR / 2BA',
+    service: 'Preferred movers',
+    preferredWindow: 'Sept 12 afternoon',
+    serviceDate: '2026-09-12',
+    amount: 325,
+    flairoFee: 32.5,
+    points: 475,
+    vendorId: null,
+    boardStatus: 'Open',
+    visibleToVendors: true,
+    residentInfoReleased: false,
+    vendorConfirmed: false,
+    paymentConsult: 'Not started',
+    invoiceStatus: 'Waiting',
+  },
+];
+
+const initialRewards: RewardEntry[] = [
+  {
+    id: 'R-8801',
+    resident: 'Maya Chen',
+    communityId: 'arbor',
+    source: 'J-1048',
+    status: 'Pending',
+    points: 498,
+    value: 4.98,
+    note: 'PLUS recurring housekeeping earn',
+  },
+  {
+    id: 'R-8794',
+    resident: 'Avery Brooks',
+    communityId: 'arbor',
+    source: 'J-1050',
+    status: 'Available',
+    points: 74,
+    value: 0.74,
+    note: 'Pet care completion pending invoice trigger',
+  },
+  {
+    id: 'R-8751',
+    resident: 'Launch wallet pool',
+    communityId: 'sawgrass',
+    source: 'Admin',
+    status: 'Available',
+    points: 125000,
+    value: 1250,
+    note: 'Launch rewards liability',
+  },
+  {
+    id: 'R-8700',
+    resident: 'Jordan Lee',
+    communityId: 'solara',
+    source: 'Reward credit',
+    status: 'Redeemed',
+    points: -500,
+    value: -5,
+    note: 'Applied to move-out cleaning',
+  },
+];
+
+const initialInvoices: InvoiceTrigger[] = [
+  {
+    id: 'INV-Q-2208',
+    jobId: 'J-1050',
+    vendorId: 'pink-palm',
+    amount: 2.7,
+    status: 'Ready',
+    dueDate: '2026-09-07',
+    reference: 'Ready for Bluevine draft',
+  },
+  {
+    id: 'INV-Q-2209',
+    jobId: 'J-1038',
+    vendorId: 'sparkle',
+    amount: 118.4,
+    status: 'Draft queued',
+    dueDate: '2026-09-05',
+    reference: 'Bluevine draft requested',
+  },
+];
+
+const initialAudit: AuditEntry[] = [
+  {
+    id: 'A-1',
+    action: 'Vendor claim',
+    detail: 'Sparkle & Settle claimed J-1048; resident contact released.',
+    time: 'Today 10:42 AM',
+  },
+  {
+    id: 'A-2',
+    action: 'Invoice trigger',
+    detail: 'J-1050 passed service date and entered the Bluevine draft queue.',
+    time: 'Today 9:18 AM',
+  },
+  {
+    id: 'A-3',
+    action: 'Mobile catalog',
+    detail: 'Move-out touch-up painting remains hidden from the resident app.',
+    time: 'Yesterday 4:06 PM',
+  },
+];
+
+function dollars(value: number) {
+  return value.toLocaleString('en-US', {
+    currency: 'USD',
+    maximumFractionDigits: value % 1 === 0 ? 0 : 2,
+    minimumFractionDigits: value % 1 === 0 ? 0 : 2,
+    style: 'currency',
+  });
+}
+
+function percent(value: number) {
+  return `${value.toFixed(0)}%`;
+}
+
+export default function ControlCenter({
+  viewerEmail,
+  viewerName,
+}: {
+  viewerEmail: string;
+  viewerName: string;
+}) {
+  const [activeModule, setActiveModule] = useState<ModuleId>('command');
+  const [services, setServices] = useState<Service[]>(initialServices);
+  const [vendors, setVendors] = useState<Vendor[]>(initialVendors);
+  const [jobs, setJobs] = useState<Job[]>(initialJobs);
+  const [rewards, setRewards] = useState<RewardEntry[]>(initialRewards);
+  const [invoices, setInvoices] = useState<InvoiceTrigger[]>(initialInvoices);
+  const [communities, setCommunities] = useState<Community[]>(initialCommunities);
+  const [audit, setAudit] = useState<AuditEntry[]>(initialAudit);
+  const [syncStatus, setSyncStatus] = useState('Connecting to FLAIRO data');
+
+  const applyServerState = (state: Partial<FlairoState>) => {
+    if (state.audit) setAudit(state.audit);
+    if (state.communities) setCommunities(state.communities);
+    if (state.invoices) setInvoices(state.invoices);
+    if (state.jobs) setJobs(state.jobs);
+    if (state.rewards) setRewards(state.rewards);
+    if (state.services) setServices(state.services);
+    if (state.vendors) setVendors(state.vendors);
+  };
+
+  useEffect(() => {
+    let active = true;
+
+    fetch('/api/flairo')
+      .then((response) => {
+        if (!response.ok) throw new Error('FLAIRO data unavailable');
+        return response.json() as Promise<FlairoState>;
+      })
+      .then((state) => {
+        if (!active) return;
+        applyServerState(state);
+        setSyncStatus('Synced to FLAIRO data store');
+      })
+      .catch(() => {
+        if (!active) return;
+        setSyncStatus('Local preview data');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const persistAction = async (action: string, payload: Record<string, string>) => {
+    setSyncStatus('Saving changes');
+    try {
+      const response = await fetch('/api/flairo', {
+        body: JSON.stringify({ action, payload }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      if (!response.ok) throw new Error('Save failed');
+      const state = await response.json() as FlairoState;
+      applyServerState(state);
+      setSyncStatus('Synced to FLAIRO data store');
+    } catch {
+      setSyncStatus('Local changes staged');
+    }
+  };
+
+  const metrics = useMemo(() => {
+    const openBoard = jobs.filter((job) => job.visibleToVendors).length;
+    const controlledTasks = jobs.filter((job) => job.boardStatus !== 'Open').length;
+    const compliant = vendors.filter((vendor) => vendor.boardAccess).length;
+    const rewardLiability = rewards
+      .filter((entry) => entry.status === 'Available' || entry.status === 'Pending')
+      .reduce((sum, entry) => sum + entry.value, 0);
+    const invoiceQueue = invoices
+      .filter((invoice) => invoice.status === 'Ready' || invoice.status === 'Draft queued')
+      .reduce((sum, invoice) => sum + invoice.amount, 0);
+
+    return [
+      { label: 'Vendor-visible jobs', value: String(openBoard), detail: 'Open resident requests' },
+      { label: 'FLAIRO controlled tasks', value: String(controlledTasks), detail: 'Claimed, scheduled, or complete' },
+      { label: 'Compliant vendors', value: `${compliant}/${vendors.length}`, detail: 'Board access eligible' },
+      { label: 'Rewards liability', value: dollars(rewardLiability), detail: 'Pending and available points' },
+      { label: 'Invoice trigger queue', value: dollars(invoiceQueue), detail: 'Bluevine draft requests' },
+      { label: 'PLUS memberships', value: '182', detail: 'Across active communities' },
+    ];
+  }, [invoices, jobs, rewards, vendors]);
+
+  const addAudit = (action: string, detail: string) => {
+    setAudit((current) => [
+      {
+        id: `A-${Date.now()}`,
+        action,
+        detail,
+        time: 'Just now',
+      },
+      ...current,
+    ]);
+  };
+
+  const toggleServiceVisibility = (serviceId: string) => {
+    setServices((current) =>
+      current.map((service) =>
+        service.id === serviceId
+          ? { ...service, mobileVisible: !service.mobileVisible }
+          : service,
+      ),
+    );
+    addAudit('Mobile catalog', 'Employee changed a resident-facing service visibility setting.');
+    void persistAction('toggle_service_visibility', { serviceId });
+  };
+
+  const markDocumentUploaded = (vendorId: string, document: 'insurance' | 'license') => {
+    setVendors((current) =>
+      current.map((vendor) =>
+        vendor.id === vendorId
+          ? {
+              ...vendor,
+              [document]: vendor[document] === 'Verified' ? 'Verified' : 'Under review',
+              stage: `${document === 'insurance' ? 'Insurance' : 'Business license'} uploaded for review`,
+              status: vendor.status === 'Compliant' ? 'Compliant' : 'Review needed',
+            }
+          : vendor,
+      ),
+    );
+    addAudit('Vendor document', `Compliance document uploaded for ${vendorName(vendorId, vendors)}.`);
+    void persistAction('upload_document', { documentType: document, vendorId });
+  };
+
+  const approveVendor = (vendorId: string) => {
+    setVendors((current) =>
+      current.map((vendor) =>
+        vendor.id === vendorId
+          ? {
+              ...vendor,
+              insurance: 'Verified',
+              license: 'Verified',
+              w9: 'Verified',
+              status: 'Compliant',
+              boardAccess: true,
+              stage: 'Board access active',
+            }
+          : vendor,
+      ),
+    );
+    addAudit('Vendor approved', `${vendorName(vendorId, vendors)} can now claim matching work.`);
+    void persistAction('approve_vendor', { vendorId });
+  };
+
+  const claimJob = (jobId: string) => {
+    const job = jobs.find((item) => item.id === jobId);
+    if (!job) return;
+    const match = vendors.find(
+      (vendor) =>
+        vendor.boardAccess &&
+        vendor.markets.includes(job.market) &&
+        vendor.services.includes(job.service),
+    );
+    if (!match) {
+      addAudit('Claim blocked', `${jobId} has no compliant vendor in the matching market.`);
+      return;
+    }
+
+    setJobs((current) =>
+      current.map((item) =>
+        item.id === jobId
+          ? {
+              ...item,
+              vendorId: match.id,
+              boardStatus: 'Claimed',
+              visibleToVendors: false,
+              residentInfoReleased: true,
+              paymentConsult: 'Resident contact released; vendor to schedule and consult on payment',
+            }
+          : item,
+      ),
+    );
+    addAudit('Vendor claim', `${match.name} claimed ${jobId}; job removed from vendor board.`);
+    void persistAction('claim_job', { jobId });
+  };
+
+  const confirmSchedule = (jobId: string) => {
+    setJobs((current) =>
+      current.map((job) =>
+        job.id === jobId
+          ? {
+              ...job,
+              boardStatus: 'Scheduled',
+              vendorConfirmed: true,
+              paymentConsult: 'Resident and vendor confirmed direct payment plan',
+            }
+          : job,
+      ),
+    );
+    addAudit('Schedule confirmed', `${jobId} now has vendor confirmation in the open task portal.`);
+    void persistAction('confirm_schedule', { jobId });
+  };
+
+  const completeJob = (jobId: string) => {
+    const job = jobs.find((item) => item.id === jobId);
+    setJobs((current) =>
+      current.map((item) =>
+        item.id === jobId
+          ? {
+              ...item,
+              boardStatus: 'Completed',
+              invoiceStatus: 'Ready',
+              paymentConsult: 'Service date passed; ready for FLAIRO fee invoice',
+            }
+          : item,
+      ),
+    );
+    if (job) {
+      setRewards((current) => [
+        {
+          id: `R-${Date.now()}`,
+          resident: job.resident,
+          communityId: job.communityId,
+          source: job.id,
+          status: 'Available',
+          points: job.points,
+          value: job.points / 100,
+          note: `${job.service} completion verified`,
+        },
+        ...current,
+      ]);
+    }
+    addAudit('Job completed', `${jobId} completed and moved into invoice-ready status.`);
+    void persistAction('complete_job', { jobId });
+  };
+
+  const triggerInvoice = (jobId: string) => {
+    const job = jobs.find((item) => item.id === jobId);
+    if (!job || !job.vendorId) {
+      addAudit('Invoice blocked', `${jobId} needs a claimed vendor before invoice creation.`);
+      return;
+    }
+
+    const invoiceId = `INV-Q-${Date.now().toString().slice(-5)}`;
+    setInvoices((current) => [
+      {
+        id: invoiceId,
+        jobId: job.id,
+        vendorId: job.vendorId,
+        amount: job.flairoFee,
+        status: 'Draft queued',
+        dueDate: 'Net 7',
+        reference: 'Bluevine draft requested',
+      },
+      ...current,
+    ]);
+    setJobs((current) =>
+      current.map((item) =>
+        item.id === jobId ? { ...item, invoiceStatus: 'Draft queued' } : item,
+      ),
+    );
+    addAudit('Bluevine invoice trigger', `${invoiceId} created for ${job.id}.`);
+    void persistAction('trigger_invoice', { jobId });
+  };
+
+  const markStatementIssued = (communityId: string) => {
+    setCommunities((current) =>
+      current.map((community) =>
+        community.id === communityId ? { ...community, statementStatus: 'Issued' } : community,
+      ),
+    );
+    addAudit('Statement issued', `${communityName(communityId, communities)} statement marked issued.`);
+    void persistAction('mark_statement_issued', { communityId });
+  };
+
+  return (
+    <main className="app-shell">
+      <aside className="side-nav" aria-label="FLAIRO employee navigation">
+        <div className="brand-block">
+          <img src="/flairo-assets/flairo-app-icon-gold.png" alt="" className="brand-mark" />
+          <div>
+            <p className="brand-name">Flairo</p>
+            <p className="brand-subtitle">Employee control</p>
+          </div>
+        </div>
+
+        <nav className="nav-list">
+          {navSections.map((section) => (
+            <button
+              aria-pressed={activeModule === section.id}
+              className={`nav-link ${activeModule === section.id ? 'active' : ''}`}
+              key={section.id}
+              onClick={() => setActiveModule(section.id)}
+              type="button"
+            >
+              <span>{section.label}</span>
+              <b>{section.tag}</b>
+            </button>
+          ))}
+        </nav>
+
+        <div className="side-card">
+          <p className="eyebrow">Operating rule</p>
+          <p>
+            A vendor sees only open jobs in approved markets. After claim, the job leaves the board and stays in FLAIRO task control.
+          </p>
+        </div>
+      </aside>
+
+      <section className="workspace">
+        <header className="topbar">
+          <div>
+            <p className="eyebrow">Resident Benefit Program Operations</p>
+            <h1>{moduleTitle(activeModule)}</h1>
+          </div>
+          <div className="topbar-actions">
+            <div className="sync-panel">
+              <span>Data status</span>
+              <strong>{syncStatus}</strong>
+            </div>
+            <div className="user-panel">
+              <span>{viewerName}</span>
+              <strong>{viewerEmail}</strong>
+            </div>
+          </div>
+        </header>
+
+        {activeModule === 'command' && (
+          <CommandModule
+            audit={audit}
+            communities={communities}
+            metrics={metrics}
+            vendors={vendors}
+          />
+        )}
+
+        {activeModule === 'mobile' && (
+          <MobileControlsModule
+            communities={communities}
+            services={services}
+            toggleServiceVisibility={toggleServiceVisibility}
+          />
+        )}
+
+        {activeModule === 'vendors' && (
+          <VendorsModule
+            approveVendor={approveVendor}
+            markDocumentUploaded={markDocumentUploaded}
+            vendors={vendors}
+          />
+        )}
+
+        {activeModule === 'board' && (
+          <JobBoardModule
+            claimJob={claimJob}
+            communities={communities}
+            jobs={jobs}
+            vendors={vendors}
+          />
+        )}
+
+        {activeModule === 'tasks' && (
+          <OpenTasksModule
+            communities={communities}
+            completeJob={completeJob}
+            confirmSchedule={confirmSchedule}
+            jobs={jobs}
+            triggerInvoice={triggerInvoice}
+            vendors={vendors}
+          />
+        )}
+
+        {activeModule === 'rewards' && (
+          <RewardsModule communities={communities} rewards={rewards} />
+        )}
+
+        {activeModule === 'invoices' && (
+          <InvoicesModule
+            invoices={invoices}
+            jobs={jobs}
+            triggerInvoice={triggerInvoice}
+            vendors={vendors}
+          />
+        )}
+
+        {activeModule === 'reports' && (
+          <ReportsModule
+            communities={communities}
+            markStatementIssued={markStatementIssued}
+          />
+        )}
+
+        {activeModule === 'settings' && (
+          <SettingsModule audit={audit} services={services} vendors={vendors} />
+        )}
+      </section>
+    </main>
+  );
+}
+
+function CommandModule({
+  audit,
+  communities,
+  metrics,
+  vendors,
+}: {
+  audit: AuditEntry[];
+  communities: Community[];
+  metrics: Array<{ label: string; value: string; detail: string }>;
+  vendors: Vendor[];
+}) {
+  const reviewVendors = vendors.filter((vendor) => vendor.status !== 'Compliant');
+  const readyStatements = communities.filter((community) => community.statementStatus === 'Ready');
+
+  return (
+    <>
+      <section className="hero-grid" id="command">
+        <div className="command-panel">
+          <div className="panel-copy">
+            <p className="eyebrow gold">Today at a glance</p>
+            <h2>Control FLAIRO services, vendor compliance, resident rewards, and community income from one employee workspace.</h2>
+            <p>
+              The resident mobile app stays resident-facing. This site manages what appears there, which vendors can claim work, and when FLAIRO invoices earned fees.
+            </p>
+          </div>
+          <img src="/flairo-assets/flairo-gold-full-logo-web.jpg" alt="FLAIRO logo" className="hero-logo" />
+        </div>
+
+        <div className="queue-panel">
+          <p className="eyebrow">Priority queues</p>
+          <QueueRow count={reviewVendors.length} detail="Vendor insurance, license, or onboarding review needed" label="Compliance review" tone="review" />
+          <QueueRow count={18} detail="Open work visible to compliant vendor pools by location" label="Vendor job board" tone="live" />
+          <QueueRow count={readyStatements.length} detail="Community reporting packages ready for issue" label="Statements ready" tone="finance" />
+          <QueueRow count={12} detail="Service-date passed jobs ready for invoice drafting" label="Bluevine triggers" tone="active" />
+        </div>
+      </section>
+
+      <MetricGrid metrics={metrics} />
+
+      <section className="workflow-panel">
+        {['Resident request', 'Board release', 'Vendor claim', 'Task control', 'Service passed', 'Invoice trigger', 'Statement reporting'].map((step, index) => (
+          <div className="workflow-step" key={step}>
+            <span>{String(index + 1).padStart(2, '0')}</span>
+            <strong>{step}</strong>
+          </div>
+        ))}
+      </section>
+
+      <section className="split-grid">
+        <div className="table-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Employee activity</p>
+              <h2>Recent control log</h2>
+            </div>
+          </div>
+          <div className="activity-list">
+            {audit.slice(0, 5).map((entry) => (
+              <div className="activity-row" key={entry.id}>
+                <span>{entry.time}</span>
+                <strong>{entry.action}</strong>
+                <p>{entry.detail}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="image-panel">
+          <img src="/flairo-assets/flairo-identity-board.png" alt="FLAIRO identity board" />
+        </div>
+      </section>
+    </>
+  );
+}
+
+function MobileControlsModule({
+  communities,
+  services,
+  toggleServiceVisibility,
+}: {
+  communities: Community[];
+  services: Service[];
+  toggleServiceVisibility: (serviceId: string) => void;
+}) {
+  return (
+    <>
+      <section className="section-band">
+        <div>
+          <p className="eyebrow">Resident app control layer</p>
+          <h2>Manage booking options without altering the mobile app build.</h2>
+        </div>
+        <div className="integration-strip">
+          <StatusPill label="Catalog sync" status="Configured" />
+          <StatusPill label="PLUS pricing" status="Active" />
+          <StatusPill label="Rewards rules" status="Tracked" />
+        </div>
+      </section>
+
+      <section className="table-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Service catalog</p>
+            <h2>Resident-facing services and rules</h2>
+          </div>
+        </div>
+        <div className="service-grid">
+          {services.map((service) => (
+            <article className="service-card" key={service.id}>
+              <div>
+                <span className={service.mobileVisible ? 'status good' : 'status hold'}>
+                  {service.mobileVisible ? 'Visible in app' : 'Hidden from app'}
+                </span>
+                <h3>{service.name}</h3>
+                <p>{service.category}</p>
+              </div>
+              <div className="price-pair">
+                <span>Standard {dollars(service.standardPrice)}</span>
+                <span>PLUS {dollars(service.plusPrice)}</span>
+              </div>
+              <p className="muted">{service.pointsRule}</p>
+              <p className="muted">{service.vendorPoolRule}</p>
+              <button type="button" onClick={() => toggleServiceVisibility(service.id)}>
+                {service.mobileVisible ? 'Hide from app' : 'Publish to app'}
+              </button>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="split-grid">
+        <div className="table-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Locations</p>
+              <h2>Community app availability</h2>
+            </div>
+          </div>
+          <div className="compact-table">
+            <div className="compact-row header">
+              <span>Community</span>
+              <span>PLUS</span>
+              <span>Penetration</span>
+              <span>Net income</span>
+            </div>
+            {communities.map((community) => (
+              <div className="compact-row" key={community.id}>
+                <span>{community.name}</span>
+                <span>{community.plusMembers} members</span>
+                <span>{percent(community.servicePenetration)}</span>
+                <span>{dollars(community.netIncome)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <OperationalModel />
+      </section>
+    </>
+  );
+}
+
+function VendorsModule({
+  approveVendor,
+  markDocumentUploaded,
+  vendors,
+}: {
+  approveVendor: (vendorId: string) => void;
+  markDocumentUploaded: (vendorId: string, document: 'insurance' | 'license') => void;
+  vendors: Vendor[];
+}) {
+  return (
+    <>
+      <MetricGrid
+        metrics={[
+          {
+            label: 'Active vendor pool',
+            value: String(vendors.filter((vendor) => vendor.boardAccess).length),
+            detail: 'Can claim work now',
+          },
+          {
+            label: 'Compliance review',
+            value: String(vendors.filter((vendor) => vendor.status !== 'Compliant').length),
+            detail: 'Needs document or approval',
+          },
+          {
+            label: 'Avg. vendor rating',
+            value: '4.7',
+            detail: 'From completed FLAIRO jobs',
+          },
+          {
+            label: 'Default FLAIRO fee',
+            value: '10%',
+            detail: 'Vendor revenue obligation',
+          },
+        ]}
+      />
+
+      <section className="table-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Vendor CRM and compliance</p>
+            <h2>Onboarding, documents, and job-board access</h2>
+          </div>
+          <button type="button">Invite vendor</button>
+        </div>
+        <div className="vendor-list">
+          {vendors.map((vendor) => (
+            <article className="vendor-card" key={vendor.id}>
+              <div className="vendor-head">
+                <div>
+                  <span className={vendor.status === 'Compliant' ? 'status good' : 'status review'}>
+                    {vendor.status}
+                  </span>
+                  <h3>{vendor.name}</h3>
+                  <p>{vendor.contact} / {vendor.email} / {vendor.phone}</p>
+                </div>
+                <strong>{vendor.boardAccess ? 'Board access on' : 'No board access'}</strong>
+              </div>
+
+              <div className="vendor-meta">
+                <span>{vendor.markets.join(', ')}</span>
+                <span>{vendor.services.join(', ')}</span>
+                <span>FLAIRO fee {vendor.feePercent}%</span>
+                <span>Rating {vendor.rating.toFixed(1)}</span>
+              </div>
+
+              <div className="doc-grid">
+                <DocumentTile label="Insurance" status={vendor.insurance} />
+                <DocumentTile label="Business license" status={vendor.license} />
+                <DocumentTile label="W-9" status={vendor.w9} />
+              </div>
+
+              <div className="action-row">
+                <label className="file-upload">
+                  <input
+                    accept=".pdf,.png,.jpg,.jpeg"
+                    onChange={() => markDocumentUploaded(vendor.id, 'insurance')}
+                    type="file"
+                  />
+                  Upload insurance
+                </label>
+                <label className="file-upload secondary">
+                  <input
+                    accept=".pdf,.png,.jpg,.jpeg"
+                    onChange={() => markDocumentUploaded(vendor.id, 'license')}
+                    type="file"
+                  />
+                  Upload license
+                </label>
+                <button type="button" onClick={() => approveVendor(vendor.id)}>
+                  Approve for board
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function JobBoardModule({
+  claimJob,
+  communities,
+  jobs,
+  vendors,
+}: {
+  claimJob: (jobId: string) => void;
+  communities: Community[];
+  jobs: Job[];
+  vendors: Vendor[];
+}) {
+  const boardJobs = jobs.filter((job) => job.visibleToVendors);
+
+  return (
+    <>
+      <section className="section-band">
+        <div>
+          <p className="eyebrow">Vendor job board</p>
+          <h2>Only compliant, location-matched vendors can see and claim these requests.</h2>
+        </div>
+        <div className="integration-strip">
+          <StatusPill label="Claim lock" status="Exclusive" />
+          <StatusPill label="Resident contact" status="Hidden until claim" />
+          <StatusPill label="FLAIRO task copy" status="Always visible" />
+        </div>
+      </section>
+
+      <section className="job-grid">
+        {boardJobs.map((job) => {
+          const matches = vendors.filter(
+            (vendor) =>
+              vendor.boardAccess &&
+              vendor.markets.includes(job.market) &&
+              vendor.services.includes(job.service),
+          );
+
+          return (
+            <article className="job-card" key={job.id}>
+              <div className="job-head">
+                <span className="status good">Vendor visible</span>
+                <strong>{job.id}</strong>
+              </div>
+              <h3>{job.service}</h3>
+              <p>{communityName(job.communityId, communities)} / Unit {job.unit} / {job.homeProfile}</p>
+              <div className="job-facts">
+                <span>{job.preferredWindow}</span>
+                <span>{dollars(job.amount)}</span>
+                <span>{job.points} pts</span>
+              </div>
+              <div className="matched-vendors">
+                <p className="eyebrow">Eligible vendors</p>
+                {matches.length ? matches.map((vendor) => <span key={vendor.id}>{vendor.name}</span>) : <span>No compliant match</span>}
+              </div>
+              <button type="button" onClick={() => claimJob(job.id)}>
+                Claim with matched vendor
+              </button>
+            </article>
+          );
+        })}
+      </section>
+
+      <section className="table-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Claim behavior</p>
+            <h2>Claimed work leaves the vendor board</h2>
+          </div>
+        </div>
+        <div className="compact-table">
+          <div className="compact-row header">
+            <span>Rule</span>
+            <span>Vendor portal</span>
+            <span>FLAIRO employees</span>
+          </div>
+          <div className="compact-row">
+            <span>Before claim</span>
+            <span>Visible by service area and compliance</span>
+            <span>Visible in board and tasks</span>
+          </div>
+          <div className="compact-row">
+            <span>After claim</span>
+            <span>Hidden from other vendors</span>
+            <span>Visible in open task control</span>
+          </div>
+          <div className="compact-row">
+            <span>Resident info</span>
+            <span>Released only to claiming vendor</span>
+            <span>Visible for oversight and support</span>
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function OpenTasksModule({
+  communities,
+  completeJob,
+  confirmSchedule,
+  jobs,
+  triggerInvoice,
+  vendors,
+}: {
+  communities: Community[];
+  completeJob: (jobId: string) => void;
+  confirmSchedule: (jobId: string) => void;
+  jobs: Job[];
+  triggerInvoice: (jobId: string) => void;
+  vendors: Vendor[];
+}) {
+  return (
+    <section className="table-panel">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Open task page</p>
+          <h2>FLAIRO control copy for every resident request</h2>
+        </div>
+        <button type="button">Create job order</button>
+      </div>
+
+      <div className="task-stack">
+        {jobs.map((job) => (
+          <article className="task-card" key={job.id}>
+            <div className="task-main">
+              <div>
+                <span className={job.visibleToVendors ? 'status good' : 'status hold'}>
+                  {job.visibleToVendors ? 'On vendor board' : 'Board hidden'}
+                </span>
+                <h3>{job.id} / {job.service}</h3>
+                <p>{communityName(job.communityId, communities)} / Unit {job.unit} / {job.preferredWindow}</p>
+              </div>
+              <div className="task-amount">
+                <strong>{dollars(job.amount)}</strong>
+                <span>FLAIRO fee {dollars(job.flairoFee)}</span>
+              </div>
+            </div>
+
+            <div className="task-grid">
+              <InfoTile label="Vendor" value={job.vendorId ? vendorName(job.vendorId, vendors) : 'Unclaimed'} />
+              <InfoTile label="Resident contact" value={job.residentInfoReleased ? `${job.resident} / ${job.phone}` : 'Hidden until claim'} />
+              <InfoTile label="Vendor confirmation" value={job.vendorConfirmed ? 'Confirmed' : 'Needed'} />
+              <InfoTile label="Payment consult" value={job.paymentConsult} />
+              <InfoTile label="Task status" value={job.boardStatus} />
+              <InfoTile label="Invoice" value={job.invoiceStatus} />
+            </div>
+
+            <div className="action-row">
+              <button type="button" onClick={() => confirmSchedule(job.id)}>
+                Confirm booking
+              </button>
+              <button type="button" onClick={() => completeJob(job.id)}>
+                Mark service passed
+              </button>
+              <button type="button" onClick={() => triggerInvoice(job.id)}>
+                Trigger invoice
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RewardsModule({
+  communities,
+  rewards,
+}: {
+  communities: Community[];
+  rewards: RewardEntry[];
+}) {
+  const outstanding = rewards
+    .filter((entry) => entry.status === 'Available' || entry.status === 'Pending')
+    .reduce((sum, entry) => sum + entry.value, 0);
+  const pendingPoints = rewards
+    .filter((entry) => entry.status === 'Pending')
+    .reduce((sum, entry) => sum + entry.points, 0);
+
+  return (
+    <>
+      <MetricGrid
+        metrics={[
+          { label: 'Outstanding liability', value: dollars(outstanding), detail: 'Pending and available value' },
+          { label: 'Pending points', value: pendingPoints.toLocaleString(), detail: 'Held until vendor confirmation' },
+          { label: 'Free threshold', value: '500 pts', detail: '100 pts equals $1' },
+          { label: 'PLUS threshold', value: '250 pts', detail: '2x earning and lower prices' },
+        ]}
+      />
+
+      <section className="split-grid">
+        <div className="table-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Resident point monitor</p>
+              <h2>Rewards ledger</h2>
+            </div>
+            <button type="button">Run expiration batch</button>
+          </div>
+          <div className="compact-table">
+            <div className="compact-row header">
+              <span>Resident</span>
+              <span>Community</span>
+              <span>Source</span>
+              <span>Status</span>
+              <span>Points</span>
+              <span>Value</span>
+            </div>
+            {rewards.map((entry) => (
+              <div className="compact-row six" key={entry.id}>
+                <span>{entry.resident}</span>
+                <span>{communityName(entry.communityId, communities)}</span>
+                <span>{entry.source}</span>
+                <span>{entry.status}</span>
+                <span>{entry.points.toLocaleString()}</span>
+                <span>{dollars(entry.value)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="table-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Reward controls</p>
+              <h2>Program rules</h2>
+            </div>
+          </div>
+          <div className="rule-list">
+            <InfoTile label="Point value" value="100 points = $1 resident credit" />
+            <InfoTile label="Redemption cap" value="10% of eligible subtotal" />
+            <InfoTile label="PLUS membership" value="$5 monthly recurring membership" />
+            <InfoTile label="Point status" value="Pending, available, redeemed, reversed, expired" />
+            <InfoTile label="Vendor settlement" value="Reward credit can offset FLAIRO fee depending on agreement" />
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function InvoicesModule({
+  invoices,
+  jobs,
+  triggerInvoice,
+  vendors,
+}: {
+  invoices: InvoiceTrigger[];
+  jobs: Job[];
+  triggerInvoice: (jobId: string) => void;
+  vendors: Vendor[];
+}) {
+  const readyJobs = jobs.filter((job) => job.invoiceStatus === 'Ready' || job.boardStatus === 'Completed');
+
+  return (
+    <>
+      <section className="section-band">
+        <div>
+          <p className="eyebrow">Invoice processing</p>
+          <h2>Resident pays vendor directly. FLAIRO invoices vendors for the earned program fee.</h2>
+        </div>
+        <div className="integration-strip">
+          <StatusPill label="Bluevine account" status="Invoice draft queue" />
+          <StatusPill label="Payment collection" status="Vendor direct" />
+          <StatusPill label="Trigger" status="Service date passed" />
+        </div>
+      </section>
+
+      <section className="split-grid">
+        <div className="table-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Ready jobs</p>
+              <h2>Create invoice triggers</h2>
+            </div>
+          </div>
+          <div className="task-stack compact">
+            {readyJobs.length ? readyJobs.map((job) => (
+              <article className="invoice-ready-row" key={job.id}>
+                <div>
+                  <strong>{job.id} / {job.service}</strong>
+                  <p>{job.vendorId ? vendorName(job.vendorId, vendors) : 'Vendor needed'} owes {dollars(job.flairoFee)}</p>
+                </div>
+                <button type="button" onClick={() => triggerInvoice(job.id)}>
+                  Trigger invoice
+                </button>
+              </article>
+            )) : <p className="empty-note">No jobs are invoice-ready right now.</p>}
+          </div>
+        </div>
+
+        <div className="table-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Invoice queue</p>
+              <h2>Bluevine draft requests</h2>
+            </div>
+          </div>
+          <div className="compact-table">
+            <div className="compact-row header">
+              <span>Invoice</span>
+              <span>Job</span>
+              <span>Vendor</span>
+              <span>Amount</span>
+              <span>Status</span>
+            </div>
+            {invoices.map((invoice) => (
+              <div className="compact-row" key={invoice.id}>
+                <span>{invoice.id}</span>
+                <span>{invoice.jobId}</span>
+                <span>{vendorName(invoice.vendorId, vendors)}</span>
+                <span>{dollars(invoice.amount)}</span>
+                <span>{invoice.status}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function ReportsModule({
+  communities,
+  markStatementIssued,
+}: {
+  communities: Community[];
+  markStatementIssued: (communityId: string) => void;
+}) {
+  return (
+    <>
+      <MetricGrid
+        metrics={[
+          {
+            label: 'Serviced communities',
+            value: String(communities.length),
+            detail: 'Active FLAIRO reporting locations',
+          },
+          {
+            label: 'Net income this month',
+            value: dollars(communities.reduce((sum, community) => sum + community.netIncome, 0)),
+            detail: 'Community statement basis',
+          },
+          {
+            label: 'Occupied homes',
+            value: communities.reduce((sum, community) => sum + community.occupied, 0).toLocaleString(),
+            detail: 'Statement denominator',
+          },
+          {
+            label: 'Avg. penetration',
+            value: percent(communities.reduce((sum, community) => sum + community.servicePenetration, 0) / communities.length),
+            detail: 'Homes enrolled or transacting',
+          },
+        ]}
+      />
+
+      <section className="table-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Community financial reporting</p>
+            <h2>Monthly statement control</h2>
+          </div>
+          <button type="button">Export statement set</button>
+        </div>
+        <div className="statement-grid">
+          {communities.map((community) => (
+            <article className="statement-card" key={community.id}>
+              <div>
+                <span className={community.statementStatus === 'Issued' ? 'status good' : 'status review'}>
+                  {community.statementStatus}
+                </span>
+                <h3>{community.name}</h3>
+                <p>{community.address} / {community.manager}</p>
+              </div>
+              <div className="statement-numbers">
+                <InfoTile label="Homes / occupied" value={`${community.homes} / ${community.occupied}`} />
+                <InfoTile label="Program penetration" value={percent(community.servicePenetration)} />
+                <InfoTile label="PLUS members" value={String(community.plusMembers)} />
+                <InfoTile label="Net ancillary income" value={dollars(community.netIncome)} />
+              </div>
+              <button type="button" onClick={() => markStatementIssued(community.id)}>
+                Mark statement issued
+              </button>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="statement-strip">
+        <div>
+          <p className="eyebrow gold">Statement format source</p>
+          <h2>Ancillary income statement model</h2>
+          <p>
+            The reporting model follows the supplied FLAIRO workbook: property details, service period, gross revenue, vendor remittance, adjustments, net deposit, rewards liability, and community-facing tie-outs.
+          </p>
+        </div>
+        <img src="/flairo-assets/flairo-brand-board.png" alt="FLAIRO brand board" />
+      </section>
+    </>
+  );
+}
+
+function SettingsModule({
+  audit,
+  services,
+  vendors,
+}: {
+  audit: AuditEntry[];
+  services: Service[];
+  vendors: Vendor[];
+}) {
+  return (
+    <section className="split-grid">
+      <div className="table-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Integration model</p>
+            <h2>Systems this control center governs</h2>
+          </div>
+        </div>
+        <div className="rule-list">
+          <InfoTile label="Resident mobile application" value="Service catalog, booking options, PLUS pricing, reward rules, and resident request intake" />
+          <InfoTile label="Vendor portal" value="Onboarding, document upload, job board access, claim lock, schedule confirmation" />
+          <InfoTile label="FLAIRO CRM" value={`${vendors.length} vendors, ${services.length} service lines, community reporting, audit history`} />
+          <InfoTile label="Bluevine invoice queue" value="Draft invoice trigger after scheduled service date passes" />
+          <InfoTile label="Compliance storage" value="Insurance, business license, W-9, review status, expiration dates" />
+        </div>
+      </div>
+
+      <div className="table-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Audit history</p>
+            <h2>Employee actions</h2>
+          </div>
+        </div>
+        <div className="activity-list">
+          {audit.map((entry) => (
+            <div className="activity-row" key={entry.id}>
+              <span>{entry.time}</span>
+              <strong>{entry.action}</strong>
+              <p>{entry.detail}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MetricGrid({
+  metrics,
+}: {
+  metrics: Array<{ label: string; value: string; detail: string }>;
+}) {
+  return (
+    <section className="metric-grid" aria-label="business metrics">
+      {metrics.map((metric) => (
+        <article className="metric-card" key={metric.label}>
+          <p>{metric.label}</p>
+          <strong>{metric.value}</strong>
+          <span>{metric.detail}</span>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function QueueRow({
+  count,
+  detail,
+  label,
+  tone,
+}: {
+  count: number;
+  detail: string;
+  label: string;
+  tone: string;
+}) {
+  return (
+    <div className="queue-row">
+      <span className={`queue-dot ${tone}`} />
+      <div>
+        <strong>{label}</strong>
+        <p>{detail}</p>
+      </div>
+      <b>{count}</b>
+    </div>
+  );
+}
+
+function DocumentTile({ label, status }: { label: string; status: DocumentStatus }) {
+  return (
+    <div className="doc-tile">
+      <span>{label}</span>
+      <strong className={status === 'Verified' ? 'good-text' : 'review-text'}>{status}</strong>
+    </div>
+  );
+}
+
+function InfoTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="info-tile">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function StatusPill({ label, status }: { label: string; status: string }) {
+  return (
+    <div className="status-pill">
+      <span>{label}</span>
+      <strong>{status}</strong>
+    </div>
+  );
+}
+
+function OperationalModel() {
+  return (
+    <div className="table-panel">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Payment model</p>
+          <h2>Direct vendor payment, FLAIRO invoice control</h2>
+        </div>
+      </div>
+      <div className="rule-list">
+        <InfoTile label="Resident payment" value="Resident consults and pays vendor directly" />
+        <InfoTile label="FLAIRO revenue" value="Vendor owes program fee based on completed order" />
+        <InfoTile label="Invoice timing" value="Create draft after scheduled date passes" />
+        <InfoTile label="Membership" value="Resident PLUS revenue remains FLAIRO subscription income" />
+      </div>
+    </div>
+  );
+}
+
+function moduleTitle(activeModule: ModuleId) {
+  return navSections.find((section) => section.id === activeModule)?.label ?? 'Command';
+}
+
+function vendorName(vendorId: string, vendors: Vendor[]) {
+  return vendors.find((vendor) => vendor.id === vendorId)?.name ?? 'Vendor not set';
+}
+
+function communityName(communityId: string, communities: Community[]) {
+  return communities.find((community) => community.id === communityId)?.name ?? 'Community not set';
+}
