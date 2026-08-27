@@ -16,8 +16,9 @@ type ModuleId =
 type VendorStatus = 'Compliant' | 'Review needed' | 'Pending onboarding';
 type DocumentStatus = 'Verified' | 'Under review' | 'Needs upload' | 'Expiring';
 type BoardStatus = 'Open' | 'Claimed' | 'Scheduled' | 'Completed';
-type InvoiceStatus = 'Waiting' | 'Ready' | 'Draft queued' | 'Sent' | 'Hold';
+type InvoiceStatus = 'Waiting' | 'Ready' | 'Draft queued' | 'Sent' | 'Paid' | 'Hold';
 type StatementStatus = 'Draft' | 'Ready' | 'Issued';
+type RewardStatus = 'Pending' | 'Available' | 'Redeemed' | 'Reversed' | 'Expired';
 
 type Service = {
   id: string;
@@ -102,10 +103,32 @@ type RewardEntry = {
   resident: string;
   communityId: string;
   source: string;
-  status: 'Pending' | 'Available' | 'Redeemed' | 'Reversed' | 'Expired';
+  status: RewardStatus;
   points: number;
   value: number;
+  expirationDate: string | null;
+  plusMember: boolean;
+  alertQueued: boolean;
+  redeemedInExpirationWindow: boolean;
   note: string;
+};
+
+type RewardSettings = {
+  pointValueCents: number;
+  redemptionCapPercent: number;
+  plusMembershipMonthly: number;
+  plusOnlyAccrual: boolean;
+  minimumGoldBalance: number;
+  expirationMonths: number;
+  expirationReminderDays: number;
+  adoptionIndexPreviousMonth: number;
+  registrationGrowthPercent: number;
+  activationRatePercent: number;
+  firstServiceConversionPercent: number;
+  active30DayRatePercent: number;
+  repeatUseRatePercent: number;
+  surveyResponseRatePercent: number;
+  avgCxRating: number;
 };
 
 type InvoiceTrigger = {
@@ -146,7 +169,19 @@ type Drilldown = {
   label: string;
   count: string;
   detail: string;
-  rows: string[][];
+  rows: DrilldownRow[];
+};
+
+type DrilldownAction = {
+  label: string;
+  module: ModuleId;
+  recordId: string;
+};
+
+type DrilldownRow = {
+  id: string;
+  cells: string[];
+  action: DrilldownAction;
 };
 
 type ManualJobDraft = {
@@ -162,6 +197,15 @@ type ManualJobDraft = {
   amount: string;
 };
 
+type RewardAdjustmentDraft = {
+  resident: string;
+  communityId: string;
+  status: RewardStatus;
+  points: string;
+  expirationDate: string;
+  note: string;
+};
+
 type VendorMonthRow = {
   vendorId: string;
   vendorName: string;
@@ -173,6 +217,17 @@ type VendorMonthRow = {
   services: string;
 };
 
+type OpenVendorStatement = {
+  amount: number;
+  dueLabel: string;
+  invoices: InvoiceTrigger[];
+  jobCount: number;
+  jobs: Job[];
+  monthKey: string;
+  status: string;
+  vendor: Vendor;
+};
+
 type FlairoState = {
   audit: AuditEntry[];
   communities: Community[];
@@ -180,6 +235,7 @@ type FlairoState = {
   jobs: Job[];
   mobileSync: MobileSync;
   rewards: RewardEntry[];
+  rewardSettings: RewardSettings;
   services: Service[];
   vendors: Vendor[];
 };
@@ -190,7 +246,7 @@ const navSections: Array<{ id: ModuleId; label: string }> = [
   { id: 'vendors', label: 'Vendors' },
   { id: 'board', label: 'Job Board' },
   { id: 'tasks', label: 'Open Tasks' },
-  { id: 'rewards', label: 'Rewards' },
+  { id: 'rewards', label: 'Plume Points' },
   { id: 'invoices', label: 'Invoices' },
   { id: 'reports', label: 'Community Reports' },
   { id: 'settings', label: 'Settings' },
@@ -211,7 +267,7 @@ const initialServices: Service[] = [
     standardPrice: 185,
     plusPrice: 149,
     mobileVisible: true,
-    pointsRule: '1x free, 2x PLUS, 100/200 completion bonus',
+    pointsRule: 'PLUS members earn 200 Plume Points per completion',
     vendorPoolRule: 'Compliant cleaning vendors by market',
   },
   {
@@ -221,7 +277,7 @@ const initialServices: Service[] = [
     standardPrice: 245,
     plusPrice: 215,
     mobileVisible: true,
-    pointsRule: '125/250 completion bonus',
+    pointsRule: 'PLUS members earn 250 Plume Points per completion',
     vendorPoolRule: 'Cleaning vendors with turnover access',
   },
   {
@@ -231,7 +287,7 @@ const initialServices: Service[] = [
     standardPrice: 32,
     plusPrice: 27,
     mobileVisible: true,
-    pointsRule: 'Recurring eligible, low-cost visit bonus',
+    pointsRule: 'PLUS members earn recurring Plume Points on eligible visits',
     vendorPoolRule: 'Pet vendors with active license',
   },
   {
@@ -241,7 +297,7 @@ const initialServices: Service[] = [
     standardPrice: 325,
     plusPrice: 299,
     mobileVisible: true,
-    pointsRule: '150/300 completion bonus',
+    pointsRule: 'PLUS members earn 300 Plume Points per completion',
     vendorPoolRule: 'Moving vendors by ZIP and availability',
   },
   {
@@ -251,7 +307,7 @@ const initialServices: Service[] = [
     standardPrice: 125,
     plusPrice: 110,
     mobileVisible: true,
-    pointsRule: '50/100 completion bonus',
+    pointsRule: 'PLUS members earn 100 Plume Points per completion',
     vendorPoolRule: 'Home services vendors by task type',
   },
   {
@@ -261,7 +317,7 @@ const initialServices: Service[] = [
     standardPrice: 225,
     plusPrice: 195,
     mobileVisible: false,
-    pointsRule: '100/200 completion bonus',
+    pointsRule: 'PLUS members earn 200 Plume Points per completion',
     vendorPoolRule: 'Paint vendors with estimate approval',
   },
 ];
@@ -527,6 +583,10 @@ const initialRewards: RewardEntry[] = [
     status: 'Pending',
     points: 498,
     value: 4.98,
+    expirationDate: '2026-09-30',
+    plusMember: true,
+    alertQueued: false,
+    redeemedInExpirationWindow: false,
     note: 'PLUS recurring housekeeping earn',
   },
   {
@@ -537,6 +597,10 @@ const initialRewards: RewardEntry[] = [
     status: 'Available',
     points: 74,
     value: 0.74,
+    expirationDate: '2026-08-31',
+    plusMember: true,
+    alertQueued: true,
+    redeemedInExpirationWindow: false,
     note: 'Pet care completion pending invoice trigger',
   },
   {
@@ -547,7 +611,11 @@ const initialRewards: RewardEntry[] = [
     status: 'Available',
     points: 125000,
     value: 1250,
-    note: 'Launch rewards liability',
+    expirationDate: '2026-12-31',
+    plusMember: true,
+    alertQueued: false,
+    redeemedInExpirationWindow: false,
+    note: 'Launch Plume Point liability',
   },
   {
     id: 'R-8700',
@@ -557,9 +625,31 @@ const initialRewards: RewardEntry[] = [
     status: 'Redeemed',
     points: -500,
     value: -5,
+    expirationDate: '2026-08-31',
+    plusMember: true,
+    alertQueued: true,
+    redeemedInExpirationWindow: true,
     note: 'Applied to move-out cleaning',
   },
 ];
+
+const initialRewardSettings: RewardSettings = {
+  activationRatePercent: 46,
+  active30DayRatePercent: 37,
+  adoptionIndexPreviousMonth: 69,
+  avgCxRating: 4.6,
+  expirationMonths: 12,
+  expirationReminderDays: 7,
+  firstServiceConversionPercent: 28,
+  minimumGoldBalance: 500,
+  plusMembershipMonthly: 5,
+  plusOnlyAccrual: true,
+  pointValueCents: 1,
+  redemptionCapPercent: 10,
+  registrationGrowthPercent: 12,
+  repeatUseRatePercent: 31,
+  surveyResponseRatePercent: 38,
+};
 
 const initialInvoices: InvoiceTrigger[] = [
   {
@@ -569,7 +659,7 @@ const initialInvoices: InvoiceTrigger[] = [
     amount: 2.7,
     status: 'Ready',
     dueDate: '2026-09-07',
-    reference: 'Ready for Bluevine draft',
+    reference: 'Ready for monthly vendor statement',
   },
   {
     id: 'INV-Q-2209',
@@ -578,7 +668,7 @@ const initialInvoices: InvoiceTrigger[] = [
     amount: 118.4,
     status: 'Draft queued',
     dueDate: '2026-09-05',
-    reference: 'Bluevine draft requested',
+    reference: 'Added to vendor monthly statement',
   },
 ];
 
@@ -592,7 +682,7 @@ const initialAudit: AuditEntry[] = [
   {
     id: 'A-2',
     action: 'Invoice trigger',
-    detail: 'J-1050 passed service date and entered the Bluevine draft queue.',
+    detail: 'J-1050 passed service date and entered the monthly vendor statement queue.',
     time: 'Today 9:18 AM',
   },
   {
@@ -621,6 +711,10 @@ function dollars(value: number) {
   });
 }
 
+function plumePointValue(points: number, settings: RewardSettings) {
+  return Math.abs(points) * (settings.pointValueCents / 100);
+}
+
 function percent(value: number) {
   return `${value.toFixed(0)}%`;
 }
@@ -643,10 +737,12 @@ export default function ControlCenter({
   viewerName: string;
 }) {
   const [activeModule, setActiveModule] = useState<ModuleId>('command');
+  const [focusTarget, setFocusTarget] = useState<{ module: ModuleId; recordId: string } | null>(null);
   const [services, setServices] = useState<Service[]>(initialServices);
   const [vendors, setVendors] = useState<Vendor[]>(initialVendors);
   const [jobs, setJobs] = useState<Job[]>(initialJobs);
   const [rewards, setRewards] = useState<RewardEntry[]>(initialRewards);
+  const [rewardSettings, setRewardSettings] = useState<RewardSettings>(initialRewardSettings);
   const [invoices, setInvoices] = useState<InvoiceTrigger[]>(initialInvoices);
   const [communities, setCommunities] = useState<Community[]>(initialCommunities);
   const [audit, setAudit] = useState<AuditEntry[]>(initialAudit);
@@ -675,6 +771,7 @@ export default function ControlCenter({
     if (state.jobs) setJobs(state.jobs);
     if (state.mobileSync) setMobileSync(state.mobileSync);
     if (state.rewards) setRewards(state.rewards);
+    if (state.rewardSettings) setRewardSettings(state.rewardSettings);
     if (state.services) setServices(state.services);
     if (state.vendors) setVendors(state.vendors);
   };
@@ -719,7 +816,28 @@ export default function ControlCenter({
     return () => clearInterval(timer);
   }, []);
 
-  const persistAction = async (action: string, payload: Record<string, string>) => {
+  useEffect(() => {
+    if (!focusTarget || activeModule !== focusTarget.module) return;
+    const frame = window.requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>(`[data-record-id="${focusTarget.recordId}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeModule, focusTarget]);
+
+  const selectModule = (module: ModuleId) => {
+    setFocusTarget(null);
+    setActiveModule(module);
+  };
+
+  const openModuleRecord = (module: ModuleId, recordId: string) => {
+    setFocusTarget({ module, recordId });
+    setActiveModule(module);
+  };
+
+  const persistAction = async (action: string, payload: Record<string, string | number | boolean | null>) => {
     setSyncStatus('Autosaving to control center');
     try {
       const response = await fetch('/api/flairo', {
@@ -747,8 +865,8 @@ export default function ControlCenter({
     const controlledTasks = jobs.filter((job) => job.boardStatus !== 'Open').length;
     const compliant = vendors.filter((vendor) => vendor.boardAccess).length;
     const rewardLiability = rewards
-      .filter((entry) => entry.status === 'Available' || entry.status === 'Pending')
-      .reduce((sum, entry) => sum + entry.value, 0);
+      .filter((entry) => entry.status === 'Pending')
+      .reduce((sum, entry) => sum + plumePointValue(entry.points, rewardSettings), 0);
     const invoiceQueue = invoices
       .filter((invoice) => invoice.status === 'Ready' || invoice.status === 'Draft queued')
       .reduce((sum, invoice) => sum + invoice.amount, 0);
@@ -757,11 +875,11 @@ export default function ControlCenter({
       { id: 'metric-board-jobs', label: 'Vendor-visible jobs', value: String(openBoard), detail: 'Open resident requests' },
       { id: 'metric-controlled-tasks', label: 'FLAIRO controlled tasks', value: String(controlledTasks), detail: 'Claimed, scheduled, or complete' },
       { id: 'metric-compliant-vendors', label: 'Compliant vendors', value: `${compliant}/${vendors.length}`, detail: 'Board access eligible' },
-      { id: 'metric-reward-liability', label: 'Rewards liability', value: dollars(rewardLiability), detail: 'Pending and available points' },
-      { id: 'metric-invoice-queue', label: 'Invoice trigger queue', value: dollars(invoiceQueue), detail: 'Bluevine draft requests' },
+      { id: 'metric-reward-liability', label: 'Plume Point liability', value: dollars(rewardLiability), detail: 'Pending redemption value' },
+      { id: 'metric-invoice-queue', label: 'Statement queue', value: dollars(invoiceQueue), detail: 'Vendor fee records waiting for monthly closeout' },
       { id: 'metric-plus-memberships', label: 'PLUS memberships', value: '182', detail: 'Across active communities' },
     ];
-  }, [invoices, jobs, rewards, vendors]);
+  }, [invoices, jobs, rewardSettings, rewards, vendors]);
 
   const addAudit = (action: string, detail: string) => {
     setAudit((current) => [
@@ -915,7 +1033,11 @@ export default function ControlCenter({
           source: job.id,
           status: 'Available',
           points: job.points,
-          value: job.points / 100,
+          value: plumePointValue(job.points, rewardSettings),
+          expirationDate: addMonthsInputDate(todayInputDate(), rewardSettings.expirationMonths),
+          plusMember: true,
+          alertQueued: false,
+          redeemedInExpirationWindow: false,
           note: `${job.service} completion verified`,
         },
         ...current,
@@ -932,6 +1054,18 @@ export default function ControlCenter({
       return;
     }
 
+    const existingInvoice = invoices.find(
+      (invoice) => invoice.jobId === job.id && invoice.status !== 'Hold' && invoice.status !== 'Paid',
+    );
+    if (existingInvoice) {
+      addAudit(
+        'Invoice already queued',
+        `${existingInvoice.id} is already on ${vendorName(existingInvoice.vendorId, vendors)} monthly statement.`,
+      );
+      openModuleRecord('invoices', `vendor-month-${existingInvoice.vendorId}`);
+      return;
+    }
+
     const invoiceId = `INV-Q-${Date.now().toString().slice(-5)}`;
     setInvoices((current) => [
       {
@@ -941,7 +1075,7 @@ export default function ControlCenter({
         amount: job.flairoFee,
         status: 'Draft queued',
         dueDate: 'Net 7',
-        reference: 'Bluevine draft requested',
+        reference: 'Added to vendor monthly statement',
       },
       ...current,
     ]);
@@ -950,8 +1084,8 @@ export default function ControlCenter({
         item.id === jobId ? { ...item, invoiceStatus: 'Draft queued' } : item,
       ),
     );
-    addAudit('Bluevine invoice trigger', `${invoiceId} created for ${job.id}.`);
-    setActiveModule('invoices');
+    addAudit('Invoice statement item', `${invoiceId} added ${job.id} to ${vendorName(job.vendorId, vendors)} monthly statement.`);
+    openModuleRecord('invoices', `vendor-month-${job.vendorId}`);
     void persistAction('trigger_invoice', { jobId });
   };
 
@@ -1137,12 +1271,109 @@ export default function ControlCenter({
     });
   };
 
+  const saveRewardSettings = (settings: RewardSettings) => {
+    setRewardSettings(settings);
+    addAudit('Plume Point rules', 'Reward program controls saved and staged for the next mobile app push.');
+    void persistAction('update_reward_settings', {
+      activationRatePercent: settings.activationRatePercent,
+      active30DayRatePercent: settings.active30DayRatePercent,
+      adoptionIndexPreviousMonth: settings.adoptionIndexPreviousMonth,
+      avgCxRating: settings.avgCxRating,
+      expirationMonths: settings.expirationMonths,
+      expirationReminderDays: settings.expirationReminderDays,
+      firstServiceConversionPercent: settings.firstServiceConversionPercent,
+      minimumGoldBalance: settings.minimumGoldBalance,
+      plusMembershipMonthly: settings.plusMembershipMonthly,
+      plusOnlyAccrual: settings.plusOnlyAccrual,
+      pointValueCents: settings.pointValueCents,
+      redemptionCapPercent: settings.redemptionCapPercent,
+      registrationGrowthPercent: settings.registrationGrowthPercent,
+      repeatUseRatePercent: settings.repeatUseRatePercent,
+      surveyResponseRatePercent: settings.surveyResponseRatePercent,
+    });
+  };
+
+  const adminAdjustPlumePoints = (draft: RewardAdjustmentDraft) => {
+    const points = Math.round(Number(draft.points));
+    if (!draft.resident.trim() || !points || !draft.communityId) {
+      addAudit('Plume Point adjustment blocked', 'Resident, community, and Plume Point amount are required.');
+      return;
+    }
+
+    const storedPoints = draft.status === 'Available' ? Math.abs(points) : -Math.abs(points);
+    const entry: RewardEntry = {
+      alertQueued: false,
+      communityId: draft.communityId,
+      expirationDate: draft.expirationDate || addMonthsInputDate(todayInputDate(), rewardSettings.expirationMonths),
+      id: `R-${Date.now()}`,
+      note: draft.note.trim() || `${draft.status} by FLAIRO ADMIN`,
+      plusMember: true,
+      points: storedPoints,
+      redeemedInExpirationWindow: false,
+      resident: draft.resident.trim(),
+      source: 'Admin',
+      status: draft.status,
+      value: storedPoints < 0 ? -plumePointValue(storedPoints, rewardSettings) : plumePointValue(storedPoints, rewardSettings),
+    };
+
+    setRewards((current) => [entry, ...current]);
+    addAudit('Plume Point adjustment', `${entry.resident} ledger updated by ${storedPoints.toLocaleString()} Plume Points.`);
+    void persistAction('admin_adjust_plume_points', {
+      communityId: entry.communityId,
+      expirationDate: entry.expirationDate,
+      note: entry.note,
+      points: entry.points,
+      resident: entry.resident,
+      status: entry.status,
+    });
+  };
+
+  const runExpirationBatch = () => {
+    const reminderDays = rewardSettings.expirationReminderDays;
+    const today = new Date(`${todayInputDate()}T00:00:00`).getTime();
+    let alertCount = 0;
+    let expiredCount = 0;
+
+    const updatedRewards = rewards.map((entry) => {
+      if (!entry.expirationDate || (entry.status !== 'Available' && entry.status !== 'Pending')) return entry;
+      const expiresAt = new Date(`${entry.expirationDate}T00:00:00`).getTime();
+      if (Number.isNaN(expiresAt)) return entry;
+      const daysUntilExpiration = Math.ceil((expiresAt - today) / (24 * HOUR_MS));
+
+      if (daysUntilExpiration <= 0) {
+        expiredCount += 1;
+        return {
+          ...entry,
+          alertQueued: true,
+          status: 'Expired',
+          value: -plumePointValue(entry.points, rewardSettings),
+        };
+      }
+
+      if (daysUntilExpiration <= reminderDays && !entry.alertQueued) {
+        alertCount += 1;
+        return { ...entry, alertQueued: true };
+      }
+
+      return entry;
+    });
+
+    setRewards(updatedRewards);
+
+    addAudit(
+      'Expiration batch',
+      `${alertCount} seven-day Plume Point alerts queued and ${expiredCount} balances moved to expired value for statements.`,
+    );
+    void persistAction('run_expiration_batch', { reminderDays });
+  };
+
   const processVendorMonth = (vendorId: string, monthKey: string) => {
     const readyJobs = jobs.filter(
       (job) =>
         job.vendorId === vendorId &&
         jobInMonth(job, monthKey) &&
         job.invoiceStatus !== 'Sent' &&
+        job.invoiceStatus !== 'Paid' &&
         jobInvoiceActionable(job),
     );
     if (!readyJobs.length) {
@@ -1159,12 +1390,43 @@ export default function ControlCenter({
     setInvoices((current) =>
       current.map((invoice) =>
         readyJobIds.has(invoice.jobId)
-          ? { ...invoice, status: 'Sent', reference: 'Month-end invoice processed' }
+          ? { ...invoice, status: 'Sent', reference: 'Included on vendor monthly statement' }
           : invoice,
       ),
     );
-    addAudit('Vendor month processed', `${vendorName(vendorId, vendors)} ${labelMonth(monthKey)} invoices processed; active tally reset.`);
+    addAudit('Vendor month processed', `${vendorName(vendorId, vendors)} ${labelMonth(monthKey)} monthly statement processed; job-level tally reset.`);
     void persistAction('process_vendor_month', { monthKey, vendorId });
+  };
+
+  const markVendorStatementPaid = (vendorId: string, monthKey: string) => {
+    const statementInvoices = invoices.filter(
+      (invoice) =>
+        invoice.vendorId === vendorId &&
+        invoice.status !== 'Paid' &&
+        invoice.status !== 'Hold' &&
+        invoiceStatementMonth(invoice, jobs) === monthKey,
+    );
+    if (!statementInvoices.length) {
+      addAudit('Statement payment waiting', `${vendorName(vendorId, vendors)} has no open unpaid statement for ${labelMonth(monthKey)}.`);
+      return;
+    }
+
+    const invoiceIds = new Set(statementInvoices.map((invoice) => invoice.id));
+    const statementJobIds = new Set(statementInvoices.map((invoice) => invoice.jobId));
+    setInvoices((current) =>
+      current.map((invoice) =>
+        invoiceIds.has(invoice.id)
+          ? { ...invoice, status: 'Paid', reference: 'Manual vendor statement payment recorded' }
+          : invoice,
+      ),
+    );
+    setJobs((current) =>
+      current.map((job) =>
+        statementJobIds.has(job.id) ? { ...job, invoiceStatus: 'Paid' } : job,
+      ),
+    );
+    addAudit('Vendor statement paid', `${vendorName(vendorId, vendors)} ${labelMonth(monthKey)} statement marked paid manually.`);
+    void persistAction('mark_vendor_statement_paid', { monthKey, vendorId });
   };
 
   const markStatementIssued = (communityId: string) => {
@@ -1223,7 +1485,7 @@ export default function ControlCenter({
               aria-pressed={activeModule === section.id}
               className={`nav-link ${activeModule === section.id ? 'active' : ''}`}
               key={section.id}
-              onClick={() => setActiveModule(section.id)}
+              onClick={() => selectModule(section.id)}
               type="button"
             >
               <span>{section.label}</span>
@@ -1273,7 +1535,7 @@ export default function ControlCenter({
             jobs={jobs}
             clock={clock}
             metrics={metrics}
-            openInvoices={() => setActiveModule('invoices')}
+            onOpenRecord={openModuleRecord}
             rewards={rewards}
             vendors={vendors}
           />
@@ -1290,6 +1552,7 @@ export default function ControlCenter({
         {activeModule === 'vendors' && (
           <VendorsModule
             approveVendor={approveVendor}
+            highlightRecordId={activeModule === 'vendors' ? focusTarget?.recordId : null}
             markDocumentUploaded={markDocumentUploaded}
             vendors={vendors}
           />
@@ -1300,6 +1563,7 @@ export default function ControlCenter({
             claimJob={claimJob}
             communities={communities}
             clock={clock}
+            highlightRecordId={activeModule === 'board' ? focusTarget?.recordId : null}
             jobs={jobs}
             vendors={vendors}
           />
@@ -1314,6 +1578,7 @@ export default function ControlCenter({
             confirmVendorPayment={confirmVendorPayment}
             createManualJobOrder={createManualJobOrder}
             clock={clock}
+            highlightRecordId={activeModule === 'tasks' ? focusTarget?.recordId : null}
             jobs={jobs}
             manualJobDraft={manualJobDraft}
             reactivateJob={reactivateJob}
@@ -1328,13 +1593,23 @@ export default function ControlCenter({
         )}
 
         {activeModule === 'rewards' && (
-          <RewardsModule communities={communities} rewards={rewards} />
+          <RewardsModule
+            adminAdjustPlumePoints={adminAdjustPlumePoints}
+            communities={communities}
+            rewardSettings={rewardSettings}
+            rewards={rewards}
+            highlightRecordId={activeModule === 'rewards' ? focusTarget?.recordId : null}
+            runExpirationBatch={runExpirationBatch}
+            saveRewardSettings={saveRewardSettings}
+          />
         )}
 
         {activeModule === 'invoices' && (
           <InvoicesModule
             invoices={invoices}
             jobs={jobs}
+            highlightRecordId={activeModule === 'invoices' ? focusTarget?.recordId : null}
+            markVendorStatementPaid={markVendorStatementPaid}
             processVendorMonth={processVendorMonth}
             triggerInvoice={triggerInvoice}
             vendors={vendors}
@@ -1344,6 +1619,7 @@ export default function ControlCenter({
         {activeModule === 'reports' && (
           <ReportsModule
             communities={communities}
+            highlightRecordId={activeModule === 'reports' ? focusTarget?.recordId : null}
             markStatementIssued={markStatementIssued}
           />
         )}
@@ -1362,7 +1638,7 @@ function CommandModule({
   invoices,
   jobs,
   metrics,
-  openInvoices,
+  onOpenRecord,
   rewards,
   vendors,
 }: {
@@ -1371,7 +1647,7 @@ function CommandModule({
   invoices: InvoiceTrigger[];
   jobs: Job[];
   metrics: Metric[];
-  openInvoices: () => void;
+  onOpenRecord: (module: ModuleId, recordId: string) => void;
   rewards: RewardEntry[];
   vendors: Vendor[];
 }) {
@@ -1380,66 +1656,96 @@ function CommandModule({
   const boardJobs = jobs.filter((job) => job.visibleToVendors);
   const controlledJobs = jobs.filter((job) => job.boardStatus !== 'Open');
   const readyStatements = communities.filter((community) => community.statementStatus === 'Ready');
-  const readyInvoiceJobs = jobs.filter((job) => job.invoiceStatus === 'Ready' || job.invoiceStatus === 'Draft queued');
   const invoiceQueue = invoices.filter((invoice) => invoice.status === 'Ready' || invoice.status === 'Draft queued');
+  const queuedInvoiceJobIds = new Set(invoiceQueue.map((invoice) => invoice.jobId));
+  const readyInvoiceJobs = jobs.filter(
+    (job) =>
+      job.vendorId &&
+      job.invoiceStatus === 'Ready' &&
+      !queuedInvoiceJobIds.has(job.id),
+  );
   const activeRewardEntries = rewards.filter((entry) => entry.status === 'Available' || entry.status === 'Pending');
+  const priorityComplianceRows: DrilldownRow[] = reviewVendors.map((vendor) => ({
+    action: { label: 'Review vendor', module: 'vendors', recordId: `vendor-${vendor.id}` },
+    cells: [
+      vendor.name,
+      vendor.stage,
+      `Insurance: ${vendor.insurance}`,
+      `License: ${vendor.license}`,
+    ],
+    id: `vendor-${vendor.id}`,
+  }));
+  const priorityBoardRows: DrilldownRow[] = boardJobs.map((job) => ({
+    action: { label: 'Open job', module: 'board', recordId: `job-${job.id}` },
+    cells: [
+      job.id,
+      job.service,
+      `${communityName(job.communityId, communities)} / ${job.market}`,
+      `${getJobTimer(job, clock).value} unclaimed / ${job.preferredWindow}`,
+    ],
+    id: `board-${job.id}`,
+  }));
+  const priorityStatementRows: DrilldownRow[] = readyStatements.map((community) => ({
+    action: { label: 'Open report', module: 'reports', recordId: `statement-${community.id}` },
+    cells: [
+      community.name,
+      community.manager,
+      `${community.plusMembers} PLUS members`,
+      dollars(community.netIncome),
+    ],
+    id: `statement-${community.id}`,
+  }));
+  const priorityInvoiceRows: DrilldownRow[] = [
+    ...readyInvoiceJobs.map((job) => ({
+      action: { label: 'Process', module: 'invoices' as ModuleId, recordId: `vendor-month-${job.vendorId}` },
+      cells: [
+        job.id,
+        job.vendorId ? vendorName(job.vendorId, vendors) : 'Vendor needed',
+        'Ready for monthly statement',
+        dollars(job.flairoFee),
+      ],
+      id: `invoice-ready-${job.id}`,
+    })),
+    ...invoiceQueue.map((invoice) => ({
+      action: { label: 'Open statement', module: 'invoices' as ModuleId, recordId: `vendor-month-${invoice.vendorId}` },
+      cells: [
+        invoice.id,
+        vendorName(invoice.vendorId, vendors),
+        invoice.status,
+        dollars(invoice.amount),
+      ],
+      id: `invoice-${invoice.id}`,
+    })),
+  ];
 
   const priorityDrilldowns: Drilldown[] = [
     {
       id: 'priority-compliance',
       label: 'Compliance review',
-      count: String(reviewVendors.length),
+      count: String(priorityComplianceRows.length),
       detail: 'Vendors that need a document upload, review, or board-access decision today.',
-      rows: reviewVendors.map((vendor) => [
-        vendor.name,
-        vendor.stage,
-        `Insurance: ${vendor.insurance}`,
-        `License: ${vendor.license}`,
-      ]),
+      rows: priorityComplianceRows,
     },
     {
       id: 'priority-board',
       label: 'Vendor job board',
-      count: String(boardJobs.length),
+      count: String(priorityBoardRows.length),
       detail: 'Resident requests still visible for compliant vendors to claim by market and service.',
-      rows: boardJobs.map((job) => [
-        job.id,
-        job.service,
-        `${communityName(job.communityId, communities)} / ${job.market}`,
-        `${getJobTimer(job, clock).value} unclaimed / ${job.preferredWindow}`,
-      ]),
+      rows: priorityBoardRows,
     },
     {
       id: 'priority-statements',
       label: 'Statements ready',
-      count: String(readyStatements.length),
+      count: String(priorityStatementRows.length),
       detail: 'Community income reports ready to review, export, or mark issued.',
-      rows: readyStatements.map((community) => [
-        community.name,
-        community.manager,
-        `${community.plusMembers} PLUS members`,
-        dollars(community.netIncome),
-      ]),
+      rows: priorityStatementRows,
     },
     {
       id: 'priority-invoices',
-      label: 'Bluevine triggers',
-      count: String(readyInvoiceJobs.length + invoiceQueue.length),
-      detail: 'Completed jobs and invoice records that should be pushed into the Bluevine draft flow.',
-      rows: [
-        ...readyInvoiceJobs.map((job) => [
-          job.id,
-          job.vendorId ? vendorName(job.vendorId, vendors) : 'Vendor needed',
-          job.invoiceStatus,
-          dollars(job.flairoFee),
-        ]),
-        ...invoiceQueue.map((invoice) => [
-          invoice.id,
-          vendorName(invoice.vendorId, vendors),
-          invoice.status,
-          dollars(invoice.amount),
-        ]),
-      ],
+      label: 'Vendor invoice statements',
+      count: String(priorityInvoiceRows.length),
+      detail: 'Completed jobs and invoice records that should roll into monthly vendor statements.',
+      rows: priorityInvoiceRows,
     },
   ];
 
@@ -1449,72 +1755,96 @@ function CommandModule({
       label: 'Vendor-visible jobs',
       count: String(boardJobs.length),
       detail: 'The open requests still available to the vendor pool.',
-      rows: boardJobs.map((job) => [
-        job.id,
-        job.service,
-        communityName(job.communityId, communities),
-        `${job.market} / ${job.preferredWindow}`,
-      ]),
+      rows: boardJobs.map((job) => ({
+        action: { label: 'Open job', module: 'board', recordId: `job-${job.id}` },
+        cells: [
+          job.id,
+          job.service,
+          communityName(job.communityId, communities),
+          `${job.market} / ${job.preferredWindow}`,
+        ],
+        id: `metric-board-${job.id}`,
+      })),
     },
     {
       id: 'metric-controlled-tasks',
       label: 'FLAIRO controlled tasks',
       count: String(controlledJobs.length),
       detail: 'Claimed, scheduled, and completed work that employees can still manage.',
-      rows: controlledJobs.map((job) => [
-        job.id,
-        job.boardStatus,
-        job.vendorId ? vendorName(job.vendorId, vendors) : 'Unclaimed',
-        `${getJobTimer(job, clock).label}: ${getJobTimer(job, clock).value}`,
-      ]),
+      rows: controlledJobs.map((job) => ({
+        action: { label: 'Open task', module: 'tasks', recordId: `task-${job.id}` },
+        cells: [
+          job.id,
+          job.boardStatus,
+          job.vendorId ? vendorName(job.vendorId, vendors) : 'Unclaimed',
+          `${getJobTimer(job, clock).label}: ${getJobTimer(job, clock).value}`,
+        ],
+        id: `metric-task-${job.id}`,
+      })),
     },
     {
       id: 'metric-compliant-vendors',
       label: 'Compliant vendors',
       count: `${vendors.filter((vendor) => vendor.boardAccess).length}/${vendors.length}`,
       detail: 'Vendors allowed to claim work after compliance approval.',
-      rows: vendors.map((vendor) => [
-        vendor.name,
-        vendor.status,
-        vendor.boardAccess ? 'Board access on' : 'Board access off',
-        vendor.markets.join(', '),
-      ]),
+      rows: vendors.map((vendor) => ({
+        action: { label: 'Open vendor', module: 'vendors', recordId: `vendor-${vendor.id}` },
+        cells: [
+          vendor.name,
+          vendor.status,
+          vendor.boardAccess ? 'Board access on' : 'Board access off',
+          vendor.markets.join(', '),
+        ],
+        id: `metric-vendor-${vendor.id}`,
+      })),
     },
     {
       id: 'metric-reward-liability',
-      label: 'Rewards liability',
+      label: 'Plume Point liability',
       count: dollars(activeRewardEntries.reduce((sum, entry) => sum + entry.value, 0)),
-      detail: 'Pending and available resident points that still carry value.',
-      rows: activeRewardEntries.map((entry) => [
-        entry.resident,
-        entry.status,
-        `${entry.points.toLocaleString()} pts`,
-        dollars(entry.value),
-      ]),
+      detail: 'Pending and available resident Plume Points that still carry value.',
+      rows: activeRewardEntries.map((entry) => ({
+        action: { label: 'Open ledger', module: 'rewards', recordId: `reward-${entry.id}` },
+        cells: [
+          entry.resident,
+          entry.status,
+          `${entry.points.toLocaleString()} Plume Points`,
+          dollars(entry.value),
+        ],
+        id: `metric-reward-${entry.id}`,
+      })),
     },
     {
       id: 'metric-invoice-queue',
-      label: 'Invoice trigger queue',
+      label: 'Statement queue',
       count: dollars(invoiceQueue.reduce((sum, invoice) => sum + invoice.amount, 0)),
-      detail: 'Invoice drafts waiting for or already queued to the Bluevine process.',
-      rows: invoiceQueue.map((invoice) => [
-        invoice.id,
-        invoice.jobId,
-        vendorName(invoice.vendorId, vendors),
-        `${invoice.status} / ${dollars(invoice.amount)}`,
-      ]),
+      detail: 'Vendor fee records waiting for or already queued to monthly closeout.',
+      rows: invoiceQueue.map((invoice) => ({
+        action: { label: 'Open statement', module: 'invoices', recordId: `vendor-month-${invoice.vendorId}` },
+        cells: [
+          invoice.id,
+          invoice.jobId,
+          vendorName(invoice.vendorId, vendors),
+          `${invoice.status} / ${dollars(invoice.amount)}`,
+        ],
+        id: `metric-invoice-${invoice.id}`,
+      })),
     },
     {
       id: 'metric-plus-memberships',
       label: 'PLUS memberships',
       count: String(communities.reduce((sum, community) => sum + community.plusMembers, 0)),
       detail: 'Paid recurring FLAIRO PLUS memberships by community.',
-      rows: communities.map((community) => [
-        community.name,
-        `${community.plusMembers} PLUS members`,
-        `${community.occupied} occupied homes`,
-        `${percent(community.servicePenetration)} penetration`,
-      ]),
+      rows: communities.map((community) => ({
+        action: { label: 'Open report', module: 'reports', recordId: `statement-${community.id}` },
+        cells: [
+          community.name,
+          `${community.plusMembers} PLUS members`,
+          `${community.occupied} occupied homes`,
+          `${percent(community.servicePenetration)} penetration`,
+        ],
+        id: `metric-community-${community.id}`,
+      })),
     },
   ];
 
@@ -1535,10 +1865,17 @@ function CommandModule({
           <p className="drilldown-summary">{selectedDrilldown.detail}</p>
           <div className="drilldown-list">
             {selectedDrilldown.rows.length ? selectedDrilldown.rows.slice(0, 6).map((row) => (
-              <div className="drilldown-row" key={row.join('-')}>
-                {row.map((cell) => (
-                  <span key={cell}>{cell}</span>
+              <div className="drilldown-row" key={row.id}>
+                {row.cells.map((cell, index) => (
+                  <span key={`${row.id}-${index}`}>{cell}</span>
                 ))}
+                <button
+                  className="row-action-button"
+                  onClick={() => onOpenRecord(row.action.module, row.action.recordId)}
+                  type="button"
+                >
+                  {row.action.label}
+                </button>
               </div>
             )) : (
               <div className="drilldown-empty">Nothing needs attention in this queue.</div>
@@ -1570,7 +1907,7 @@ function CommandModule({
 
       <VendorMonthCloseoutPanel
         jobs={jobs}
-        onOpenInvoices={openInvoices}
+        onOpenInvoices={() => onOpenRecord('invoices', 'vendor-month-panel')}
         vendors={vendors}
       />
     </>
@@ -1596,7 +1933,7 @@ function MobileControlsModule({
         <div className="integration-strip">
           <StatusPill label="Catalog sync" status="Configured" />
           <StatusPill label="PLUS pricing" status="Active" />
-          <StatusPill label="Rewards rules" status="Tracked" />
+          <StatusPill label="Plume Point rules" status="Tracked" />
         </div>
       </section>
 
@@ -1661,10 +1998,12 @@ function MobileControlsModule({
 
 function VendorsModule({
   approveVendor,
+  highlightRecordId,
   markDocumentUploaded,
   vendors,
 }: {
   approveVendor: (vendorId: string) => void;
+  highlightRecordId?: string | null;
   markDocumentUploaded: (vendorId: string, document: 'insurance' | 'license') => void;
   vendors: Vendor[];
 }) {
@@ -1705,7 +2044,11 @@ function VendorsModule({
         </div>
         <div className="vendor-list">
           {vendors.map((vendor) => (
-            <article className="vendor-card" key={vendor.id}>
+            <article
+              className={`vendor-card${highlightRecordId === `vendor-${vendor.id}` ? ' record-highlight' : ''}`}
+              data-record-id={`vendor-${vendor.id}`}
+              key={vendor.id}
+            >
               <div className="vendor-head">
                 <div>
                   <span className={vendor.status === 'Compliant' ? 'status good' : 'status review'}>
@@ -1763,12 +2106,14 @@ function JobBoardModule({
   claimJob,
   clock,
   communities,
+  highlightRecordId,
   jobs,
   vendors,
 }: {
   claimJob: (jobId: string) => void;
   clock: number;
   communities: Community[];
+  highlightRecordId?: string | null;
   jobs: Job[];
   vendors: Vendor[];
 }) {
@@ -1799,7 +2144,11 @@ function JobBoardModule({
           );
 
           return (
-            <article className="job-card" key={job.id}>
+            <article
+              className={`job-card${highlightRecordId === `job-${job.id}` ? ' record-highlight' : ''}`}
+              data-record-id={`job-${job.id}`}
+              key={job.id}
+            >
               <div className="job-head">
                 <span className="status good">Vendor visible</span>
                 <strong>{job.id}</strong>
@@ -1809,7 +2158,7 @@ function JobBoardModule({
               <div className="job-facts">
                 <span>{job.preferredWindow}</span>
                 <span>{dollars(job.amount)}</span>
-                <span>{job.points} pts</span>
+                <span>{job.points} Plume Points</span>
               </div>
               <JobTimer timer={timer} />
               <div className="matched-vendors">
@@ -1837,6 +2186,7 @@ function OpenTasksModule({
   confirmSchedule,
   confirmVendorPayment,
   createManualJobOrder,
+  highlightRecordId,
   jobs,
   manualJobDraft,
   reactivateJob,
@@ -1855,6 +2205,7 @@ function OpenTasksModule({
   confirmSchedule: (jobId: string) => void;
   confirmVendorPayment: (jobId: string) => void;
   createManualJobOrder: () => void;
+  highlightRecordId?: string | null;
   jobs: Job[];
   manualJobDraft: ManualJobDraft;
   reactivateJob: (jobId: string) => void;
@@ -2005,7 +2356,11 @@ function OpenTasksModule({
           const timer = getJobTimer(job, clock);
           const vendor = job.vendorId ? vendors.find((item) => item.id === job.vendorId) : undefined;
           return (
-          <article className="task-card" key={job.id}>
+          <article
+            className={`task-card${highlightRecordId === `task-${job.id}` ? ' record-highlight' : ''}`}
+            data-record-id={`task-${job.id}`}
+            key={job.id}
+          >
             <div className="task-main">
               <div>
                 <span className="status hold">Board hidden</span>
@@ -2063,75 +2418,354 @@ function OpenTasksModule({
 }
 
 function RewardsModule({
+  adminAdjustPlumePoints,
   communities,
+  highlightRecordId,
+  rewardSettings,
   rewards,
+  runExpirationBatch,
+  saveRewardSettings,
 }: {
+  adminAdjustPlumePoints: (draft: RewardAdjustmentDraft) => void;
   communities: Community[];
+  highlightRecordId?: string | null;
+  rewardSettings: RewardSettings;
   rewards: RewardEntry[];
+  runExpirationBatch: () => void;
+  saveRewardSettings: (settings: RewardSettings) => void;
 }) {
-  const outstanding = rewards
-    .filter((entry) => entry.status === 'Available' || entry.status === 'Pending')
-    .reduce((sum, entry) => sum + entry.value, 0);
-  const pendingPoints = rewards
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [communityFilter, setCommunityFilter] = useState('All');
+  const [pointFilter, setPointFilter] = useState('All');
+  const [expirationFilter, setExpirationFilter] = useState('');
+  const [settingsDraft, setSettingsDraft] = useState<RewardSettings>(rewardSettings);
+  const [adjustmentDraft, setAdjustmentDraft] = useState<RewardAdjustmentDraft>({
+    communityId: communities[0]?.id ?? '',
+    expirationDate: addMonthsInputDate(todayInputDate(), rewardSettings.expirationMonths),
+    note: '',
+    points: '',
+    resident: '',
+    status: 'Available',
+  });
+
+  useEffect(() => {
+    setSettingsDraft(rewardSettings);
+  }, [rewardSettings]);
+
+  const filteredRewards = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    return rewards.filter((entry) => {
+      const searchable = [
+        entry.resident,
+        communityName(entry.communityId, communities),
+        entry.source,
+        entry.status,
+        entry.note,
+        entry.expirationDate ?? '',
+        String(entry.points),
+      ].join(' ').toLowerCase();
+      const matchesSearch = !normalizedSearch || searchable.includes(normalizedSearch);
+      const matchesStatus = statusFilter === 'All' || entry.status === statusFilter;
+      const matchesCommunity = communityFilter === 'All' || entry.communityId === communityFilter;
+      const matchesExpiration = !expirationFilter || entry.expirationDate === expirationFilter;
+      const absolutePoints = Math.abs(entry.points);
+      const matchesPoints =
+        pointFilter === 'All' ||
+        (pointFilter === 'Under 500' && absolutePoints < 500) ||
+        (pointFilter === '500 or more' && absolutePoints >= 500) ||
+        (pointFilter === '1,000 or more' && absolutePoints >= 1000);
+
+      return matchesSearch && matchesStatus && matchesCommunity && matchesExpiration && matchesPoints;
+    });
+  }, [communities, communityFilter, expirationFilter, pointFilter, rewards, search, statusFilter]);
+
+  const pendingPlumePoints = filteredRewards
     .filter((entry) => entry.status === 'Pending')
-    .reduce((sum, entry) => sum + entry.points, 0);
+    .reduce((sum, entry) => sum + Math.abs(entry.points), 0);
+  const pendingValue = plumePointValue(pendingPlumePoints, settingsDraft);
+  const currentMonth = todayInputDate().slice(0, 7);
+  const expiringEntries = filteredRewards.filter(
+    (entry) =>
+      (entry.status === 'Available' || entry.status === 'Pending') &&
+      entry.expirationDate?.startsWith(currentMonth),
+  );
+  const expiringPlumePoints = expiringEntries.reduce((sum, entry) => sum + Math.abs(entry.points), 0);
+  const alertWindowResidents = new Set(
+    filteredRewards
+      .filter((entry) => entry.redeemedInExpirationWindow)
+      .map((entry) => entry.resident),
+  ).size;
+  const adoptionIndex = calculateAdoptionVelocityIndex(settingsDraft);
+  const adoptionTrend = adoptionIndex - settingsDraft.adoptionIndexPreviousMonth;
+  const expirationRisk = calculateExpirationRisk(filteredRewards);
+  const recommendation = rewardProgramRecommendation(settingsDraft, expirationRisk, adoptionIndex);
+  const plusEntries = filteredRewards.filter((entry) => entry.plusMember).length;
+
+  const updateSettingsDraft = <K extends keyof RewardSettings>(field: K, value: RewardSettings[K]) => {
+    setSettingsDraft((current) => ({ ...current, [field]: value }));
+  };
+
+  const updateAdjustmentDraft = <K extends keyof RewardAdjustmentDraft>(field: K, value: RewardAdjustmentDraft[K]) => {
+    setAdjustmentDraft((current) => ({ ...current, [field]: value }));
+  };
+
+  const submitAdjustment = () => {
+    adminAdjustPlumePoints(adjustmentDraft);
+    setAdjustmentDraft({
+      communityId: adjustmentDraft.communityId,
+      expirationDate: addMonthsInputDate(todayInputDate(), settingsDraft.expirationMonths),
+      note: '',
+      points: '',
+      resident: '',
+      status: 'Available',
+    });
+  };
 
   return (
     <>
       <MetricGrid
         metrics={[
-          { label: 'Outstanding liability', value: dollars(outstanding), detail: 'Pending and available value' },
-          { label: 'Pending points', value: pendingPoints.toLocaleString(), detail: 'Held until vendor confirmation' },
-          { label: 'Free threshold', value: '500 pts', detail: '100 pts equals $1' },
-          { label: 'PLUS threshold', value: '250 pts', detail: '2x earning and lower prices' },
+          { label: 'Pending redemption value', value: dollars(pendingValue), detail: `${pendingPlumePoints.toLocaleString()} pending Plume Points` },
+          { label: 'Pending Plume Points', value: pendingPlumePoints.toLocaleString(), detail: 'Selected on current active jobs' },
+          { label: 'Expiring this month', value: expiringPlumePoints.toLocaleString(), detail: `${dollars(plumePointValue(expiringPlumePoints, settingsDraft))} potential statement value` },
+          { label: '7-day alert redemptions', value: String(alertWindowResidents), detail: 'Residents who redeemed after expiration nudge' },
+          { label: 'Adoption Velocity Index', value: `${adoptionIndex}`, detail: `${adoptionTrend >= 0 ? '+' : ''}${adoptionTrend} MoM / ${recommendation}` },
+          { label: 'PLUS accrual eligibility', value: `${plusEntries}/${filteredRewards.length || rewards.length}`, detail: 'Only FLAIRO Plus members earn Plume Points' },
         ]}
       />
 
-      <section className="split-grid">
-        <div className="table-panel">
+      <section className="table-panel reward-workspace">
+        <div>
           <div className="section-heading">
             <div>
-              <p className="eyebrow">Resident point monitor</p>
-              <h2>Rewards ledger</h2>
+              <p className="eyebrow">Resident Plume Point monitor</p>
+              <h2>Plume Points ledger</h2>
             </div>
-            <button type="button">Run expiration batch</button>
+            <button type="button" onClick={runExpirationBatch}>
+              Run expiration batch
+            </button>
           </div>
-          <div className="compact-table">
-            <div className="compact-row header">
+
+          <div className="reward-filter-bar">
+            <label>
+              Search
+              <input
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Resident, source, note, date, or Plume Points"
+                type="search"
+                value={search}
+              />
+            </label>
+            <label>
+              Status
+              <select onChange={(event) => setStatusFilter(event.target.value)} value={statusFilter}>
+                <option>All</option>
+                <option>Pending</option>
+                <option>Available</option>
+                <option>Redeemed</option>
+                <option>Reversed</option>
+                <option>Expired</option>
+              </select>
+            </label>
+            <label>
+              Community
+              <select onChange={(event) => setCommunityFilter(event.target.value)} value={communityFilter}>
+                <option value="All">All</option>
+                {communities.map((community) => (
+                  <option key={community.id} value={community.id}>{community.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Plume Points
+              <select onChange={(event) => setPointFilter(event.target.value)} value={pointFilter}>
+                <option>All</option>
+                <option>Under 500</option>
+                <option>500 or more</option>
+                <option>1,000 or more</option>
+              </select>
+            </label>
+            <label>
+              Expiration date
+              <input onChange={(event) => setExpirationFilter(event.target.value)} type="date" value={expirationFilter} />
+            </label>
+          </div>
+
+          <div className="compact-table ledger-table">
+            <div className="compact-row header seven">
               <span>Resident</span>
               <span>Community</span>
               <span>Source</span>
               <span>Status</span>
-              <span>Points</span>
+              <span>Plume Points</span>
+              <span>Expiration</span>
               <span>Value</span>
             </div>
-            {rewards.map((entry) => (
-              <div className="compact-row six" key={entry.id}>
+            {filteredRewards.length ? filteredRewards.map((entry) => (
+              <div
+                className={`compact-row seven${highlightRecordId === `reward-${entry.id}` ? ' record-highlight' : ''}`}
+                data-record-id={`reward-${entry.id}`}
+                key={entry.id}
+              >
                 <span>{entry.resident}</span>
                 <span>{communityName(entry.communityId, communities)}</span>
                 <span>{entry.source}</span>
-                <span>{entry.status}</span>
+                <span>{entry.status}{entry.alertQueued ? ' / alert queued' : ''}</span>
                 <span>{entry.points.toLocaleString()}</span>
+                <span>{entry.expirationDate ?? 'No expiration set'}</span>
                 <span>{dollars(entry.value)}</span>
               </div>
-            ))}
+            )) : (
+              <div className="empty-note table-empty">No Plume Point ledger entries match those filters.</div>
+            )}
           </div>
         </div>
 
-        <div className="table-panel">
-          <div className="section-heading">
+        <div className="gold-divider" />
+
+        <div className="reward-control-grid">
+          <section className="sub-panel">
             <div>
-              <p className="eyebrow">Reward controls</p>
+              <p className="eyebrow">Plume Point controls</p>
               <h2>Program rules</h2>
             </div>
-          </div>
-          <div className="rule-list">
-            <InfoTile label="Point value" value="100 points = $1 resident credit" />
-            <InfoTile label="Redemption cap" value="10% of eligible subtotal" />
-            <InfoTile label="PLUS membership" value="$5 monthly recurring membership" />
-            <InfoTile label="Point status" value="Pending, available, redeemed, reversed, expired" />
-            <InfoTile label="Vendor settlement" value="Reward credit can offset FLAIRO fee depending on agreement" />
-          </div>
+            <div className="form-grid three">
+              <label>
+                Plume Point value
+                <input
+                  min="1"
+                  onChange={(event) => updateSettingsDraft('pointValueCents', Number(event.target.value) || 0)}
+                  type="number"
+                  value={settingsDraft.pointValueCents}
+                />
+              </label>
+              <label>
+                Redemption cap %
+                <input
+                  min="0"
+                  onChange={(event) => updateSettingsDraft('redemptionCapPercent', Number(event.target.value) || 0)}
+                  type="number"
+                  value={settingsDraft.redemptionCapPercent}
+                />
+              </label>
+              <label>
+                PLUS membership $
+                <input
+                  min="0"
+                  onChange={(event) => updateSettingsDraft('plusMembershipMonthly', Number(event.target.value) || 0)}
+                  type="number"
+                  value={settingsDraft.plusMembershipMonthly}
+                />
+              </label>
+              <label>
+                Gold balance threshold
+                <input
+                  min="0"
+                  onChange={(event) => updateSettingsDraft('minimumGoldBalance', Number(event.target.value) || 0)}
+                  type="number"
+                  value={settingsDraft.minimumGoldBalance}
+                />
+              </label>
+              <label>
+                Expiration months
+                <input
+                  min="1"
+                  onChange={(event) => updateSettingsDraft('expirationMonths', Number(event.target.value) || 1)}
+                  type="number"
+                  value={settingsDraft.expirationMonths}
+                />
+              </label>
+              <label>
+                Reminder days
+                <input
+                  min="1"
+                  onChange={(event) => updateSettingsDraft('expirationReminderDays', Number(event.target.value) || 1)}
+                  type="number"
+                  value={settingsDraft.expirationReminderDays}
+                />
+              </label>
+            </div>
+            <label className="check-control">
+              <input
+                checked={settingsDraft.plusOnlyAccrual}
+                onChange={(event) => updateSettingsDraft('plusOnlyAccrual', event.target.checked)}
+                type="checkbox"
+              />
+              <span>Only FLAIRO Plus members accrue Plume Points</span>
+            </label>
+            <button type="button" onClick={() => saveRewardSettings(settingsDraft)}>
+              Save Plume controls
+            </button>
+          </section>
+
+          <section className="sub-panel">
+            <div>
+              <p className="eyebrow">Administrator adjustment</p>
+              <h2>Resident Plume Points</h2>
+            </div>
+            <div className="form-grid two">
+              <label>
+                Resident
+                <input
+                  onChange={(event) => updateAdjustmentDraft('resident', event.target.value)}
+                  placeholder="Resident name"
+                  value={adjustmentDraft.resident}
+                />
+              </label>
+              <label>
+                Community
+                <select
+                  onChange={(event) => updateAdjustmentDraft('communityId', event.target.value)}
+                  value={adjustmentDraft.communityId}
+                >
+                  {communities.map((community) => (
+                    <option key={community.id} value={community.id}>{community.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Action
+                <select
+                  onChange={(event) => updateAdjustmentDraft('status', event.target.value as RewardStatus)}
+                  value={adjustmentDraft.status}
+                >
+                  <option value="Available">Add available</option>
+                  <option value="Expired">Manually expire</option>
+                  <option value="Reversed">Reverse or adjust down</option>
+                </select>
+              </label>
+              <label>
+                Plume Points
+                <input
+                  min="1"
+                  onChange={(event) => updateAdjustmentDraft('points', event.target.value)}
+                  placeholder="500"
+                  type="number"
+                  value={adjustmentDraft.points}
+                />
+              </label>
+              <label>
+                Expiration date
+                <input
+                  onChange={(event) => updateAdjustmentDraft('expirationDate', event.target.value)}
+                  type="date"
+                  value={adjustmentDraft.expirationDate}
+                />
+              </label>
+              <label>
+                Note
+                <input
+                  onChange={(event) => updateAdjustmentDraft('note', event.target.value)}
+                  placeholder="Reason for adjustment"
+                  value={adjustmentDraft.note}
+                />
+              </label>
+            </div>
+            <button type="button" onClick={submitAdjustment}>
+              Update resident balance
+            </button>
+          </section>
         </div>
       </section>
     </>
@@ -2139,35 +2773,49 @@ function RewardsModule({
 }
 
 function InvoicesModule({
+  highlightRecordId,
   invoices,
   jobs,
+  markVendorStatementPaid,
   processVendorMonth,
   triggerInvoice,
   vendors,
 }: {
+  highlightRecordId?: string | null;
   invoices: InvoiceTrigger[];
   jobs: Job[];
+  markVendorStatementPaid: (vendorId: string, monthKey: string) => void;
   processVendorMonth: (vendorId: string, monthKey: string) => void;
   triggerInvoice: (jobId: string) => void;
   vendors: Vendor[];
 }) {
-  const readyJobs = jobs.filter((job) => job.invoiceStatus !== 'Sent' && jobInvoiceActionable(job));
+  const activeInvoices = invoices.filter((invoice) => invoice.status !== 'Hold' && invoice.status !== 'Paid');
+  const queuedJobIds = new Set(activeInvoices.map((invoice) => invoice.jobId));
+  const openStatements = buildOpenVendorStatements(invoices, jobs, vendors);
+  const readyJobs = jobs.filter(
+    (job) =>
+      job.invoiceStatus !== 'Sent' &&
+      job.invoiceStatus !== 'Paid' &&
+      jobInvoiceActionable(job) &&
+      !queuedJobIds.has(job.id),
+  );
 
   return (
     <>
       <section className="section-band">
         <div>
           <p className="eyebrow">Invoice processing</p>
-          <h2>Resident pays vendor directly. FLAIRO invoices vendors for the earned program fee.</h2>
+          <h2>Job fee records roll into one monthly vendor statement for FLAIRO invoicing.</h2>
         </div>
         <div className="integration-strip">
-          <StatusPill label="Bluevine account" status="Invoice draft queue" />
-          <StatusPill label="Payment collection" status="Vendor direct" />
-          <StatusPill label="Trigger" status="Service date passed" />
+          <StatusPill label="Bluevine account" status="Monthly statement draft" />
+          <StatusPill label="Resident payment" status="Vendor direct" />
+          <StatusPill label="Closeout" status="Vendor-by-vendor" />
         </div>
       </section>
 
       <VendorMonthCloseoutPanel
+        highlightRecordId={highlightRecordId}
         invoiceMode
         jobs={jobs}
         processVendorMonth={processVendorMonth}
@@ -2179,48 +2827,82 @@ function InvoicesModule({
           <div className="section-heading">
             <div>
               <p className="eyebrow">Ready jobs</p>
-              <h2>Create invoice triggers</h2>
+              <h2>Add job records to monthly statements</h2>
             </div>
           </div>
           <div className="task-stack compact">
             {readyJobs.length ? readyJobs.map((job) => (
-              <article className="invoice-ready-row" key={job.id}>
+              <article
+                className={`invoice-ready-row${highlightRecordId === `invoice-ready-${job.id}` ? ' record-highlight' : ''}`}
+                data-record-id={`invoice-ready-${job.id}`}
+                key={job.id}
+              >
                 <div>
                   <strong>{job.id} / {job.service}</strong>
-                  <p>{job.vendorId ? vendorName(job.vendorId, vendors) : 'Vendor needed'} owes {dollars(job.flairoFee)}</p>
+                  <p>{job.vendorId ? vendorName(job.vendorId, vendors) : 'Vendor needed'} monthly statement item: {dollars(job.flairoFee)}</p>
                 </div>
                 <button type="button" onClick={() => triggerInvoice(job.id)}>
-                  Trigger invoice
+                  Add to statement
                 </button>
               </article>
             )) : <p className="empty-note">No jobs are invoice-ready right now.</p>}
           </div>
         </div>
 
-        <div className="table-panel">
+        <div className="table-panel open-statement-panel">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">Invoice queue</p>
-              <h2>Bluevine draft requests</h2>
+              <p className="eyebrow">Open unpaid statements</p>
+              <h2>Running vendor invoice statements</h2>
             </div>
           </div>
-          <div className="compact-table">
-            <div className="compact-row header">
-              <span>Invoice</span>
-              <span>Job</span>
-              <span>Vendor</span>
-              <span>Amount</span>
-              <span>Status</span>
-            </div>
-            {invoices.map((invoice) => (
-              <div className="compact-row" key={invoice.id}>
-                <span>{invoice.id}</span>
-                <span>{invoice.jobId}</span>
-                <span>{vendorName(invoice.vendorId, vendors)}</span>
-                <span>{dollars(invoice.amount)}</span>
-                <span>{invoice.status}</span>
-              </div>
-            ))}
+          <div className="open-statement-stack">
+            {openStatements.length ? openStatements.map((statement) => (
+              <article
+                className={`open-statement-card${highlightRecordId === `vendor-month-${statement.vendor.id}` ? ' record-highlight' : ''}`}
+                data-record-id={`open-statement-${statement.vendor.id}-${statement.monthKey}`}
+                key={`${statement.vendor.id}-${statement.monthKey}`}
+              >
+                <div className="open-statement-head">
+                  <div>
+                    <h3>{statement.vendor.name}</h3>
+                    <p>{labelMonth(statement.monthKey)} / {statement.jobCount} job record{statement.jobCount === 1 ? '' : 's'}</p>
+                  </div>
+                  <strong>{dollars(statement.amount)}</strong>
+                </div>
+                <div className="open-statement-facts">
+                  <InfoTile label="Statement status" value={statement.status} />
+                  <InfoTile label="Due / follow-up" value={statement.dueLabel} />
+                  <InfoTile label="Collection" value="Managed manually until Bluevine connection" />
+                </div>
+                <div className="open-statement-items" aria-label={`${statement.vendor.name} unpaid statement job records`}>
+                  <div className="open-statement-item header">
+                    <span>Invoice</span>
+                    <span>Job</span>
+                    <span>Service</span>
+                    <span>FLAIRO due</span>
+                  </div>
+                  {statement.invoices.map((invoice) => {
+                    const job = jobs.find((item) => item.id === invoice.jobId);
+                    return (
+                      <div
+                        className={`open-statement-item${highlightRecordId === `invoice-${invoice.id}` ? ' record-highlight' : ''}`}
+                        data-record-id={`invoice-${invoice.id}`}
+                        key={invoice.id}
+                      >
+                        <span>{invoice.id}</span>
+                        <span>{invoice.jobId}</span>
+                        <span>{job?.service ?? invoice.reference}</span>
+                        <strong>{dollars(invoice.amount)}</strong>
+                      </div>
+                    );
+                  })}
+                </div>
+                <button type="button" onClick={() => markVendorStatementPaid(statement.vendor.id, statement.monthKey)}>
+                  Mark paid manually
+                </button>
+              </article>
+            )) : <p className="empty-note">No open unpaid vendor statements right now.</p>}
           </div>
         </div>
       </section>
@@ -2230,9 +2912,11 @@ function InvoicesModule({
 
 function ReportsModule({
   communities,
+  highlightRecordId,
   markStatementIssued,
 }: {
   communities: Community[];
+  highlightRecordId?: string | null;
   markStatementIssued: (communityId: string) => void;
 }) {
   return (
@@ -2272,7 +2956,11 @@ function ReportsModule({
         </div>
         <div className="statement-grid">
           {communities.map((community) => (
-            <article className="statement-card" key={community.id}>
+            <article
+              className={`statement-card${highlightRecordId === `statement-${community.id}` ? ' record-highlight' : ''}`}
+              data-record-id={`statement-${community.id}`}
+              key={community.id}
+            >
               <div>
                 <span className={community.statementStatus === 'Issued' ? 'status good' : 'status review'}>
                   {community.statementStatus}
@@ -2299,14 +2987,14 @@ function ReportsModule({
           <p className="eyebrow gold">Statement format source</p>
           <h2>Ancillary income statement model</h2>
           <p>
-            The reporting model follows the supplied FLAIRO workbook: property details, service period, gross revenue, vendor remittance, adjustments, net deposit, rewards liability, and community-facing tie-outs.
+            The reporting model follows the supplied FLAIRO workbook: property details, service period, gross revenue, vendor remittance, adjustments, net deposit, Plume Point liability, and community-facing tie-outs.
           </p>
         </div>
         <div className="statement-checklist" aria-label="statement controls">
           <span>Property tie-out</span>
           <span>Service period</span>
           <span>Vendor remittance</span>
-          <span>Rewards liability</span>
+          <span>Plume Point liability</span>
           <span>Net deposit</span>
         </div>
       </section>
@@ -2333,10 +3021,10 @@ function SettingsModule({
           </div>
         </div>
         <div className="rule-list">
-          <InfoTile label="Resident mobile application" value="Service catalog, booking options, PLUS pricing, reward rules, and resident request intake" />
+          <InfoTile label="Resident mobile application" value="Service catalog, booking options, PLUS pricing, Plume Point rules, and resident request intake" />
           <InfoTile label="Vendor portal" value="Onboarding, document upload, job board access, claim lock, schedule confirmation" />
           <InfoTile label="FLAIRO CRM" value={`${vendors.length} vendors, ${services.length} service lines, community reporting, audit history`} />
-          <InfoTile label="Bluevine invoice queue" value="Draft invoice trigger after scheduled service date passes" />
+          <InfoTile label="Bluevine invoice queue" value="Job fee records roll into one monthly vendor statement for Bluevine invoice processing" />
           <InfoTile label="Compliance storage" value="Insurance, business license, W-9, review status, expiration dates" />
         </div>
       </div>
@@ -2363,12 +3051,14 @@ function SettingsModule({
 }
 
 function VendorMonthCloseoutPanel({
+  highlightRecordId,
   invoiceMode = false,
   jobs,
   onOpenInvoices,
   processVendorMonth,
   vendors,
 }: {
+  highlightRecordId?: string | null;
   invoiceMode?: boolean;
   jobs: Job[];
   onOpenInvoices?: () => void;
@@ -2383,11 +3073,14 @@ function VendorMonthCloseoutPanel({
   const waitingJobs = rows.reduce((sum, row) => sum + row.waitingCount, 0);
 
   return (
-    <section className={`table-panel vendor-month-panel${invoiceMode ? ' invoice-mode' : ''}`}>
+    <section
+      className={`table-panel vendor-month-panel${invoiceMode ? ' invoice-mode' : ''}`}
+      data-record-id={invoiceMode ? 'vendor-month-panel' : 'vendor-month-command'}
+    >
       <div className="section-heading vendor-month-head">
         <div>
           <p className="eyebrow">{invoiceMode ? 'Month-end invoicing' : 'Current month vendor activity'}</p>
-          <h2>{labelMonth(monthKey)} vendor income closeout</h2>
+          <h2>{invoiceMode ? `${labelMonth(monthKey)} vendor invoice statements` : `${labelMonth(monthKey)} vendor income closeout`}</h2>
         </div>
         {onOpenInvoices && (
           <button type="button" onClick={onOpenInvoices}>
@@ -2399,7 +3092,7 @@ function VendorMonthCloseoutPanel({
       <div className="vendor-month-summary">
         <InfoTile label="Active vendors" value={String(rows.length)} />
         <InfoTile label="Resident service total" value={dollars(residentTotal)} />
-        <InfoTile label="Potential FLAIRO payout" value={dollars(flairoPayout)} />
+        <InfoTile label={invoiceMode ? 'Statement total due' : 'Potential FLAIRO payout'} value={dollars(flairoPayout)} />
         <InfoTile label="Ready to invoice" value={String(readyJobs)} />
         <InfoTile label="Waiting on service" value={String(waitingJobs)} />
       </div>
@@ -2422,27 +3115,55 @@ function VendorMonthCloseoutPanel({
               : 'Waiting';
 
           return (
-            <div className="vendor-month-row" key={row.vendorId} role="row">
-              <span>
-                <strong>{row.vendorName}</strong>
-                <em>{row.services}</em>
-              </span>
-              <span>{row.jobs.length}</span>
-              <span>{dollars(row.residentTotal)}</span>
-              <span>{dollars(row.flairoPayout)}</span>
-              <span className={`month-status ${row.waitingCount ? 'waiting' : 'ready'}`}>
-                {row.waitingCount ? `${row.waitingCount} waiting` : 'Ready for closeout'}
-              </span>
-              {invoiceMode && (
+            <div
+              className={`vendor-month-record${highlightRecordId === `vendor-month-${row.vendorId}` ? ' record-highlight' : ''}`}
+              data-record-id={`vendor-month-${row.vendorId}`}
+              key={row.vendorId}
+            >
+              <div className="vendor-month-row" role="row">
                 <span>
-                  <button
-                    disabled={!canProcess}
-                    onClick={() => processVendorMonth?.(row.vendorId, monthKey)}
-                    type="button"
-                  >
-                    {buttonLabel}
-                  </button>
+                  <strong>{row.vendorName}</strong>
+                  <em>{row.services}</em>
                 </span>
+                <span>{row.jobs.length}</span>
+                <span>{dollars(row.residentTotal)}</span>
+                <span>{dollars(row.flairoPayout)}</span>
+                <span className={`month-status ${row.waitingCount ? 'waiting' : 'ready'}`}>
+                  {row.waitingCount ? `${row.waitingCount} waiting` : 'Ready for closeout'}
+                </span>
+                {invoiceMode && (
+                  <span>
+                    <button
+                      disabled={!canProcess}
+                      onClick={() => processVendorMonth?.(row.vendorId, monthKey)}
+                      type="button"
+                    >
+                      {buttonLabel}
+                    </button>
+                  </span>
+                )}
+              </div>
+              {invoiceMode && (
+                <div className="vendor-statement-detail" aria-label={`${row.vendorName} monthly statement job breakdown`}>
+                  <div className="vendor-statement-job header">
+                    <span>Job</span>
+                    <span>Service</span>
+                    <span>Service date</span>
+                    <span>Resident paid</span>
+                    <span>FLAIRO due</span>
+                    <span>Status</span>
+                  </div>
+                  {row.jobs.map((job) => (
+                    <div className="vendor-statement-job" key={job.id} data-record-id={`statement-job-${job.id}`}>
+                      <strong>{job.id}</strong>
+                      <span>{job.service}</span>
+                      <span>{labelDateTimeShort(job.serviceDate)}</span>
+                      <span>{dollars(job.amount)}</span>
+                      <span>{dollars(job.flairoFee)}</span>
+                      <span>{job.invoiceStatus}</span>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           );
@@ -2580,6 +3301,13 @@ function todayInputDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function addMonthsInputDate(inputDate: string, months: number) {
+  const base = new Date(`${inputDate}T00:00:00`);
+  if (Number.isNaN(base.getTime())) return inputDate;
+  base.setMonth(base.getMonth() + months);
+  return base.toISOString().slice(0, 10);
+}
+
 function labelDateTimeShort(value: string) {
   const timestamp = Date.parse(value);
   if (Number.isNaN(timestamp)) return value;
@@ -2589,6 +3317,43 @@ function labelDateTimeShort(value: string) {
     minute: '2-digit',
     month: 'short',
   });
+}
+
+function calculateAdoptionVelocityIndex(settings: RewardSettings) {
+  const registration = normalizedRate(settings.registrationGrowthPercent, 10);
+  const activation = normalizedRate(settings.activationRatePercent, 50);
+  const firstService = normalizedRate(settings.firstServiceConversionPercent, 25);
+  const repeatUse = normalizedRate(settings.repeatUseRatePercent, 30);
+  return Math.round((registration * 0.4) + (activation * 0.3) + (firstService * 0.2) + (repeatUse * 0.1));
+}
+
+function normalizedRate(value: number, greenTarget: number) {
+  if (greenTarget <= 0) return 0;
+  return Math.max(0, Math.min(100, (value / greenTarget) * 100));
+}
+
+function calculateExpirationRisk(entries: RewardEntry[]) {
+  const currentMonth = todayInputDate().slice(0, 7);
+  const expiring = entries
+    .filter(
+      (entry) =>
+        (entry.status === 'Available' || entry.status === 'Pending') &&
+        entry.expirationDate?.startsWith(currentMonth),
+    )
+    .reduce((sum, entry) => sum + Math.abs(entry.points), 0);
+  const saved = entries
+    .filter((entry) => entry.redeemedInExpirationWindow)
+    .reduce((sum, entry) => sum + Math.abs(entry.points), 0);
+  const totalAtRisk = expiring + saved;
+  if (!totalAtRisk) return 0;
+  return Math.round((expiring / totalAtRisk) * 100);
+}
+
+function rewardProgramRecommendation(settings: RewardSettings, expirationRisk: number, adoptionIndex: number) {
+  if (expirationRisk > 60) return 'Weak usage risk';
+  if (adoptionIndex > settings.adoptionIndexPreviousMonth && settings.avgCxRating >= 4.5) return 'Growing well';
+  if (adoptionIndex >= settings.adoptionIndexPreviousMonth) return 'Holding steady';
+  return 'Watch adoption';
 }
 
 function sortVendorsForBoard(a: Vendor, b: Vendor) {
@@ -2695,6 +3460,7 @@ function buildVendorMonthRows(jobs: Job[], vendors: Vendor[], monthKey: string):
           job.vendorId === vendor.id &&
           job.boardStatus !== 'Open' &&
           job.invoiceStatus !== 'Sent' &&
+          job.invoiceStatus !== 'Paid' &&
           jobInMonth(job, monthKey),
       );
       const services = Array.from(new Set(monthJobs.map((job) => job.service))).join(', ');
@@ -2714,8 +3480,87 @@ function buildVendorMonthRows(jobs: Job[], vendors: Vendor[], monthKey: string):
     .sort((a, b) => b.flairoPayout - a.flairoPayout);
 }
 
+function buildOpenVendorStatements(
+  invoices: InvoiceTrigger[],
+  jobs: Job[],
+  vendors: Vendor[],
+): OpenVendorStatement[] {
+  const groups = new Map<string, OpenVendorStatement & { dueDates: string[] }>();
+
+  invoices.forEach((invoice) => {
+    if (invoice.status === 'Paid' || invoice.status === 'Hold') return;
+    const vendor = vendors.find((item) => item.id === invoice.vendorId);
+    if (!vendor) return;
+
+    const monthKey = invoiceStatementMonth(invoice, jobs);
+    const key = `${invoice.vendorId}-${monthKey}`;
+    const existing = groups.get(key);
+    const job = jobs.find((item) => item.id === invoice.jobId);
+    const nextGroup = existing ?? {
+      amount: 0,
+      dueDates: [],
+      dueLabel: 'Manual follow-up',
+      invoices: [],
+      jobCount: 0,
+      jobs: [],
+      monthKey,
+      status: 'Ready to send',
+      vendor,
+    };
+
+    nextGroup.amount += invoice.amount;
+    nextGroup.invoices.push(invoice);
+    nextGroup.jobCount += 1;
+    if (job) nextGroup.jobs.push(job);
+    if (invoice.dueDate) nextGroup.dueDates.push(invoice.dueDate);
+    groups.set(key, nextGroup);
+  });
+
+  return Array.from(groups.values())
+    .map((group) => ({
+      amount: group.amount,
+      dueLabel: labelInvoiceDue(group.dueDates),
+      invoices: group.invoices,
+      jobCount: group.jobCount,
+      jobs: group.jobs,
+      monthKey: group.monthKey,
+      status: openStatementStatus(group.invoices),
+      vendor: group.vendor,
+    }))
+    .sort((a, b) => {
+      if (a.monthKey !== b.monthKey) return b.monthKey.localeCompare(a.monthKey);
+      return b.amount - a.amount;
+    });
+}
+
+function invoiceStatementMonth(invoice: InvoiceTrigger, jobs: Job[]) {
+  const job = jobs.find((item) => item.id === invoice.jobId);
+  const sourceDate = job?.serviceDate || invoice.dueDate;
+  return /^\d{4}-\d{2}/.test(sourceDate) ? sourceDate.slice(0, 7) : currentMonthKey();
+}
+
+function openStatementStatus(invoices: InvoiceTrigger[]) {
+  const statuses = new Set(invoices.map((invoice) => invoice.status));
+  if (statuses.has('Sent')) return 'Sent unpaid';
+  if (statuses.has('Draft queued')) return 'Draft unpaid';
+  if (statuses.has('Ready')) return 'Ready to send';
+  return 'Waiting review';
+}
+
+function labelInvoiceDue(dueDates: string[]) {
+  const dated = dueDates
+    .filter((dueDate) => /^\d{4}-\d{2}-\d{2}/.test(dueDate))
+    .sort()[0];
+  if (dated) return labelDateTimeShort(dated);
+  return dueDates.find(Boolean) ?? 'Manual follow-up';
+}
+
 function jobInvoiceActionable(job: Job) {
-  return job.invoiceStatus === 'Ready' || job.invoiceStatus === 'Draft queued' || job.boardStatus === 'Completed';
+  return job.invoiceStatus !== 'Paid' && (
+    job.invoiceStatus === 'Ready' ||
+    job.invoiceStatus === 'Draft queued' ||
+    job.boardStatus === 'Completed'
+  );
 }
 
 function currentMonthKey(date = new Date()) {

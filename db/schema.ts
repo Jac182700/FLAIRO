@@ -163,6 +163,10 @@ export const rewardLedgerEntries = sqliteTable(
     status: text('status').notNull(),
     points: integer('points').notNull(),
     dollarValueCents: integer('dollar_value_cents').notNull().default(0),
+    expiresAt: text('expires_at'),
+    plusMember: integer('plus_member', { mode: 'boolean' }).notNull().default(true),
+    alertQueued: integer('alert_queued', { mode: 'boolean' }).notNull().default(false),
+    redeemedInExpirationWindow: integer('redeemed_in_expiration_window', { mode: 'boolean' }).notNull().default(false),
     reason: text('reason').notNull(),
     createdAt: text('created_at').notNull(),
   },
@@ -170,6 +174,30 @@ export const rewardLedgerEntries = sqliteTable(
     index('idx_reward_ledger_community_id').on(table.communityId),
     index('idx_reward_ledger_status').on(table.status),
   ],
+);
+
+export const rewardProgramSettings = sqliteTable(
+  'reward_program_settings',
+  {
+    id: text('id').primaryKey(),
+    pointValueCents: integer('point_value_cents').notNull().default(1),
+    redemptionCapPercent: real('redemption_cap_percent').notNull().default(10),
+    plusMembershipMonthlyCents: integer('plus_membership_monthly_cents').notNull().default(500),
+    plusOnlyAccrual: integer('plus_only_accrual', { mode: 'boolean' }).notNull().default(true),
+    minimumGoldBalance: integer('minimum_gold_balance').notNull().default(500),
+    expirationMonths: integer('expiration_months').notNull().default(12),
+    expirationReminderDays: integer('expiration_reminder_days').notNull().default(7),
+    adoptionIndexPreviousMonth: integer('adoption_index_previous_month').notNull().default(69),
+    registrationGrowthPercent: real('registration_growth_percent').notNull().default(12),
+    activationRatePercent: real('activation_rate_percent').notNull().default(46),
+    firstServiceConversionPercent: real('first_service_conversion_percent').notNull().default(28),
+    active30DayRatePercent: real('active_30_day_rate_percent').notNull().default(37),
+    repeatUseRatePercent: real('repeat_use_rate_percent').notNull().default(31),
+    surveyResponseRatePercent: real('survey_response_rate_percent').notNull().default(38),
+    avgCxRating: real('avg_cx_rating').notNull().default(4.6),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [index('idx_reward_program_settings_updated_at').on(table.updatedAt)],
 );
 
 export const invoiceTriggers = sqliteTable(

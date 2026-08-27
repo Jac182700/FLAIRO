@@ -8,8 +8,8 @@ export default async function Home() {
 
   return (
     <ControlCenter
-      viewerEmail="INFO@FLAIRO.ORG"
-      viewerName="FLAIRO Administrator"
+      viewerEmail="info@flairo.org"
+      viewerName="FLAIRO ADMIN"
     />
   );
 }

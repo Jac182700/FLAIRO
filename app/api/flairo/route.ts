@@ -88,7 +88,29 @@ type RewardSeed = {
   status: string;
   points: number;
   value: number;
+  expirationDate: string | null;
+  plusMember: boolean;
+  alertQueued: boolean;
+  redeemedInExpirationWindow: boolean;
   note: string;
+};
+
+type RewardSettingsSeed = {
+  pointValueCents: number;
+  redemptionCapPercent: number;
+  plusMembershipMonthly: number;
+  plusOnlyAccrual: boolean;
+  minimumGoldBalance: number;
+  expirationMonths: number;
+  expirationReminderDays: number;
+  adoptionIndexPreviousMonth: number;
+  registrationGrowthPercent: number;
+  activationRatePercent: number;
+  firstServiceConversionPercent: number;
+  active30DayRatePercent: number;
+  repeatUseRatePercent: number;
+  surveyResponseRatePercent: number;
+  avgCxRating: number;
 };
 
 type InvoiceSeed = {
@@ -114,6 +136,13 @@ function addHours(isoDate: string, hours: number) {
   return new Date(base + hours * HOUR_MS).toISOString();
 }
 
+function addMonthsDate(inputDate: string, months: number) {
+  const base = new Date(`${inputDate}T00:00:00Z`);
+  if (Number.isNaN(base.getTime())) return inputDate;
+  base.setUTCMonth(base.getUTCMonth() + months);
+  return base.toISOString().slice(0, 10);
+}
+
 const services: ServiceSeed[] = [
   {
     id: 'recurring-housekeeping',
@@ -122,7 +151,7 @@ const services: ServiceSeed[] = [
     standardPrice: 185,
     plusPrice: 149,
     mobileVisible: true,
-    pointsRule: '1x free, 2x PLUS, 100/200 completion bonus',
+    pointsRule: 'PLUS members earn 200 Plume Points per completion',
     vendorPoolRule: 'Compliant cleaning vendors by market',
   },
   {
@@ -132,7 +161,7 @@ const services: ServiceSeed[] = [
     standardPrice: 245,
     plusPrice: 215,
     mobileVisible: true,
-    pointsRule: '125/250 completion bonus',
+    pointsRule: 'PLUS members earn 250 Plume Points per completion',
     vendorPoolRule: 'Cleaning vendors with turnover access',
   },
   {
@@ -142,7 +171,7 @@ const services: ServiceSeed[] = [
     standardPrice: 32,
     plusPrice: 27,
     mobileVisible: true,
-    pointsRule: 'Recurring eligible, low-cost visit bonus',
+    pointsRule: 'PLUS members earn recurring Plume Points on eligible visits',
     vendorPoolRule: 'Pet vendors with active license',
   },
   {
@@ -152,7 +181,7 @@ const services: ServiceSeed[] = [
     standardPrice: 325,
     plusPrice: 299,
     mobileVisible: true,
-    pointsRule: '150/300 completion bonus',
+    pointsRule: 'PLUS members earn 300 Plume Points per completion',
     vendorPoolRule: 'Moving vendors by ZIP and availability',
   },
   {
@@ -162,7 +191,7 @@ const services: ServiceSeed[] = [
     standardPrice: 125,
     plusPrice: 110,
     mobileVisible: true,
-    pointsRule: '50/100 completion bonus',
+    pointsRule: 'PLUS members earn 100 Plume Points per completion',
     vendorPoolRule: 'Home services vendors by task type',
   },
   {
@@ -172,7 +201,7 @@ const services: ServiceSeed[] = [
     standardPrice: 225,
     plusPrice: 195,
     mobileVisible: false,
-    pointsRule: '100/200 completion bonus',
+    pointsRule: 'PLUS members earn 200 Plume Points per completion',
     vendorPoolRule: 'Paint vendors with estimate approval',
   },
 ];
@@ -438,6 +467,10 @@ const rewards: RewardSeed[] = [
     status: 'Pending',
     points: 498,
     value: 4.98,
+    expirationDate: '2026-09-30',
+    plusMember: true,
+    alertQueued: false,
+    redeemedInExpirationWindow: false,
     note: 'PLUS recurring housekeeping earn',
   },
   {
@@ -448,6 +481,10 @@ const rewards: RewardSeed[] = [
     status: 'Available',
     points: 74,
     value: 0.74,
+    expirationDate: '2026-08-31',
+    plusMember: true,
+    alertQueued: true,
+    redeemedInExpirationWindow: false,
     note: 'Pet care completion pending invoice trigger',
   },
   {
@@ -458,7 +495,11 @@ const rewards: RewardSeed[] = [
     status: 'Available',
     points: 125000,
     value: 1250,
-    note: 'Launch rewards liability',
+    expirationDate: '2026-12-31',
+    plusMember: true,
+    alertQueued: false,
+    redeemedInExpirationWindow: false,
+    note: 'Launch Plume Point liability',
   },
   {
     id: 'R-8700',
@@ -468,9 +509,31 @@ const rewards: RewardSeed[] = [
     status: 'Redeemed',
     points: -500,
     value: -5,
+    expirationDate: '2026-08-31',
+    plusMember: true,
+    alertQueued: true,
+    redeemedInExpirationWindow: true,
     note: 'Applied to move-out cleaning',
   },
 ];
+
+const rewardSettings: RewardSettingsSeed = {
+  activationRatePercent: 46,
+  active30DayRatePercent: 37,
+  adoptionIndexPreviousMonth: 69,
+  avgCxRating: 4.6,
+  expirationMonths: 12,
+  expirationReminderDays: 7,
+  firstServiceConversionPercent: 28,
+  minimumGoldBalance: 500,
+  plusMembershipMonthly: 5,
+  plusOnlyAccrual: true,
+  pointValueCents: 1,
+  redemptionCapPercent: 10,
+  registrationGrowthPercent: 12,
+  repeatUseRatePercent: 31,
+  surveyResponseRatePercent: 38,
+};
 
 const invoices: InvoiceSeed[] = [
   {
@@ -480,7 +543,7 @@ const invoices: InvoiceSeed[] = [
     amount: 2.7,
     status: 'Ready',
     dueDate: '2026-09-07',
-    reference: 'Ready for Bluevine draft',
+    reference: 'Ready for monthly vendor statement',
   },
   {
     id: 'INV-Q-2209',
@@ -489,7 +552,7 @@ const invoices: InvoiceSeed[] = [
     amount: 118.4,
     status: 'Draft queued',
     dueDate: '2026-09-05',
-    reference: 'Bluevine draft requested',
+    reference: 'Added to vendor monthly statement',
   },
 ];
 
@@ -508,52 +571,52 @@ export async function POST(request: Request) {
   try {
     await initializeDatabase(env.DB);
     await seedDatabase(env.DB);
-    const body = await request.json() as { action?: string; payload?: Record<string, string> };
+    const body = await request.json() as { action?: string; payload?: Record<string, string | number | boolean | null> };
     const payload = body.payload ?? {};
     let stageMobileChange = false;
 
     switch (body.action) {
       case 'toggle_service_visibility':
         await env.DB.prepare('UPDATE services SET mobile_visible = CASE mobile_visible WHEN 1 THEN 0 ELSE 1 END, updated_at = ? WHERE id = ?')
-          .bind(now(), payload.serviceId)
+          .bind(now(), textPayload(payload, 'serviceId'))
           .run();
-        await logEvent('Mobile catalog', payload.serviceId ?? 'service', 'Employee changed resident app service visibility.');
+        await logEvent('Mobile catalog', textPayload(payload, 'serviceId') ?? 'service', 'Employee changed resident app service visibility.');
         stageMobileChange = true;
         break;
       case 'upload_document':
-        await recordDocumentUpload(payload.vendorId, payload.documentType);
+        await recordDocumentUpload(textPayload(payload, 'vendorId'), textPayload(payload, 'documentType'));
         stageMobileChange = true;
         break;
       case 'approve_vendor':
-        await approveVendor(payload.vendorId);
+        await approveVendor(textPayload(payload, 'vendorId'));
         stageMobileChange = true;
         break;
       case 'claim_job':
-        await claimJob(payload.jobId);
+        await claimJob(textPayload(payload, 'jobId'));
         stageMobileChange = true;
         break;
       case 'confirm_schedule':
-        await confirmSchedule(payload.jobId);
+        await confirmSchedule(textPayload(payload, 'jobId'));
         stageMobileChange = true;
         break;
       case 'complete_job':
-        await completeJob(payload.jobId);
+        await completeJob(textPayload(payload, 'jobId'));
         stageMobileChange = true;
         break;
       case 'reactivate_job':
-        await reactivateJob(payload.jobId);
+        await reactivateJob(textPayload(payload, 'jobId'));
         stageMobileChange = true;
         break;
       case 'confirm_vendor_payment':
-        await confirmVendorPayment(payload.jobId);
+        await confirmVendorPayment(textPayload(payload, 'jobId'));
         stageMobileChange = true;
         break;
       case 'confirm_resident_payment':
-        await confirmResidentPayment(payload.jobId);
+        await confirmResidentPayment(textPayload(payload, 'jobId'));
         stageMobileChange = true;
         break;
       case 'submit_payment_inquiry':
-        await submitPaymentInquiry(payload.jobId);
+        await submitPaymentInquiry(textPayload(payload, 'jobId'));
         stageMobileChange = true;
         break;
       case 'create_manual_job':
@@ -561,18 +624,34 @@ export async function POST(request: Request) {
         stageMobileChange = true;
         break;
       case 'trigger_invoice':
-        await triggerInvoice(payload.jobId);
+        await triggerInvoice(textPayload(payload, 'jobId'));
         stageMobileChange = true;
         break;
       case 'process_vendor_month':
-        await processVendorMonth(payload.vendorId, payload.monthKey);
+        await processVendorMonth(textPayload(payload, 'vendorId'), textPayload(payload, 'monthKey'));
+        stageMobileChange = true;
+        break;
+      case 'mark_vendor_statement_paid':
+        await markVendorStatementPaid(textPayload(payload, 'vendorId'), textPayload(payload, 'monthKey'));
+        stageMobileChange = true;
+        break;
+      case 'update_reward_settings':
+        await updateRewardSettings(payload);
+        stageMobileChange = true;
+        break;
+      case 'admin_adjust_plume_points':
+        await adminAdjustPlumePoints(payload);
+        stageMobileChange = true;
+        break;
+      case 'run_expiration_batch':
+        await runExpirationBatch(Number(payload.reminderDays ?? rewardSettings.expirationReminderDays));
         stageMobileChange = true;
         break;
       case 'mark_statement_issued':
         await env.DB.prepare('UPDATE communities SET statement_status = ?, updated_at = ? WHERE id = ?')
-          .bind('Issued', now(), payload.communityId)
+          .bind('Issued', now(), textPayload(payload, 'communityId'))
           .run();
-        await logEvent('Statement issued', payload.communityId ?? 'community', 'Community statement marked issued.');
+        await logEvent('Statement issued', textPayload(payload, 'communityId') ?? 'community', 'Community statement marked issued.');
         stageMobileChange = true;
         break;
       case 'push_mobile_update':
@@ -601,7 +680,8 @@ async function initializeDatabase(db: D1Database) {
     db.prepare('CREATE TABLE IF NOT EXISTS vendor_documents (id TEXT PRIMARY KEY, vendor_id TEXT NOT NULL, document_type TEXT NOT NULL, status TEXT NOT NULL, storage_key TEXT, expires_at TEXT, reviewed_by TEXT, reviewed_at TEXT, created_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS resident_requests (id TEXT PRIMARY KEY, resident_name TEXT NOT NULL, resident_email TEXT NOT NULL, resident_phone TEXT NOT NULL, community_id TEXT NOT NULL, market TEXT NOT NULL, unit TEXT NOT NULL, home_profile TEXT NOT NULL, service_name TEXT NOT NULL, preferred_window TEXT NOT NULL, board_status TEXT NOT NULL, visible_to_vendors INTEGER NOT NULL DEFAULT 1, resident_info_released INTEGER NOT NULL DEFAULT 0, requested_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS job_orders (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, vendor_id TEXT, task_status TEXT NOT NULL, service_date TEXT, schedule_confirmed_at TEXT, vendor_confirmed_at TEXT, claimed_at TEXT, schedule_due_at TEXT, payment_consult_status TEXT NOT NULL DEFAULT "Not started", resident_paid_vendor INTEGER NOT NULL DEFAULT 0, vendor_payment_confirmed INTEGER NOT NULL DEFAULT 0, resident_payment_confirmed INTEGER NOT NULL DEFAULT 0, amount_paid_cents INTEGER, payment_date TEXT, receipt_number TEXT, payment_inquiry_status TEXT, service_amount_cents INTEGER NOT NULL, flairo_fee_cents INTEGER NOT NULL, points INTEGER NOT NULL DEFAULT 0, invoice_trigger_status TEXT NOT NULL DEFAULT "Waiting", created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
-    db.prepare('CREATE TABLE IF NOT EXISTS reward_ledger_entries (id TEXT PRIMARY KEY, resident_name TEXT NOT NULL, community_id TEXT NOT NULL, request_id TEXT, entry_type TEXT NOT NULL, status TEXT NOT NULL, points INTEGER NOT NULL, dollar_value_cents INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL, created_at TEXT NOT NULL)'),
+    db.prepare('CREATE TABLE IF NOT EXISTS reward_ledger_entries (id TEXT PRIMARY KEY, resident_name TEXT NOT NULL, community_id TEXT NOT NULL, request_id TEXT, entry_type TEXT NOT NULL, status TEXT NOT NULL, points INTEGER NOT NULL, dollar_value_cents INTEGER NOT NULL DEFAULT 0, expires_at TEXT, plus_member INTEGER NOT NULL DEFAULT 1, alert_queued INTEGER NOT NULL DEFAULT 0, redeemed_in_expiration_window INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL, created_at TEXT NOT NULL)'),
+    db.prepare('CREATE TABLE IF NOT EXISTS reward_program_settings (id TEXT PRIMARY KEY, point_value_cents INTEGER NOT NULL DEFAULT 1, redemption_cap_percent REAL NOT NULL DEFAULT 10, plus_membership_monthly_cents INTEGER NOT NULL DEFAULT 500, plus_only_accrual INTEGER NOT NULL DEFAULT 1, minimum_gold_balance INTEGER NOT NULL DEFAULT 500, expiration_months INTEGER NOT NULL DEFAULT 12, expiration_reminder_days INTEGER NOT NULL DEFAULT 7, adoption_index_previous_month INTEGER NOT NULL DEFAULT 69, registration_growth_percent REAL NOT NULL DEFAULT 12, activation_rate_percent REAL NOT NULL DEFAULT 46, first_service_conversion_percent REAL NOT NULL DEFAULT 28, active_30_day_rate_percent REAL NOT NULL DEFAULT 37, repeat_use_rate_percent REAL NOT NULL DEFAULT 31, survey_response_rate_percent REAL NOT NULL DEFAULT 38, avg_cx_rating REAL NOT NULL DEFAULT 4.6, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS invoice_triggers (id TEXT PRIMARY KEY, job_order_id TEXT NOT NULL, vendor_id TEXT NOT NULL, amount_cents INTEGER NOT NULL, status TEXT NOT NULL, bluevine_reference TEXT, due_date TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS mobile_sync_state (id TEXT PRIMARY KEY, connection_status TEXT NOT NULL, last_checked_at TEXT NOT NULL, last_push_at TEXT, pending_changes INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0, last_push_summary TEXT NOT NULL DEFAULT "No mobile app push yet", updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, subject TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL)'),
@@ -611,6 +691,7 @@ async function initializeDatabase(db: D1Database) {
     db.prepare('CREATE INDEX IF NOT EXISTS idx_jobs_invoice ON job_orders (invoice_trigger_status)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_vendors_access ON vendors (board_access, compliance_status)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_rewards_status ON reward_ledger_entries (status)'),
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_reward_program_settings_updated_at ON reward_program_settings (updated_at)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_mobile_sync_updated_at ON mobile_sync_state (updated_at)'),
   ]);
   await ensureColumn(db, 'job_orders', 'claimed_at', 'TEXT');
@@ -622,10 +703,15 @@ async function initializeDatabase(db: D1Database) {
   await ensureColumn(db, 'job_orders', 'payment_date', 'TEXT');
   await ensureColumn(db, 'job_orders', 'receipt_number', 'TEXT');
   await ensureColumn(db, 'job_orders', 'payment_inquiry_status', 'TEXT');
+  await ensureColumn(db, 'reward_ledger_entries', 'expires_at', 'TEXT');
+  await ensureColumn(db, 'reward_ledger_entries', 'plus_member', 'INTEGER NOT NULL DEFAULT 1');
+  await ensureColumn(db, 'reward_ledger_entries', 'alert_queued', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(db, 'reward_ledger_entries', 'redeemed_in_expiration_window', 'INTEGER NOT NULL DEFAULT 0');
   await db.prepare('UPDATE vendors SET preferred_vendor = 1 WHERE id IN (?, ?)')
     .bind('sparkle', 'porter')
     .run();
   await ensureMobileSyncState(db);
+  await ensureRewardSettings(db);
 }
 
 async function ensureColumn(db: D1Database, tableName: string, columnName: string, definition: string) {
@@ -671,8 +757,8 @@ async function seedDatabase(db: D1Database) {
   );
   await db.batch(
     rewards.map((reward) =>
-      db.prepare('INSERT INTO reward_ledger_entries (id, resident_name, community_id, request_id, entry_type, status, points, dollar_value_cents, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(reward.id, reward.resident, reward.communityId, reward.source.startsWith('J-') ? reward.source : null, reward.source, reward.status, reward.points, cents(reward.value), reward.note, stamp),
+      db.prepare('INSERT INTO reward_ledger_entries (id, resident_name, community_id, request_id, entry_type, status, points, dollar_value_cents, expires_at, plus_member, alert_queued, redeemed_in_expiration_window, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(reward.id, reward.resident, reward.communityId, reward.source.startsWith('J-') ? reward.source : null, reward.source, reward.status, reward.points, cents(reward.value), reward.expirationDate, reward.plusMember ? 1 : 0, reward.alertQueued ? 1 : 0, reward.redeemedInExpirationWindow ? 1 : 0, reward.note, stamp),
     ),
   );
   await db.batch(
@@ -685,7 +771,7 @@ async function seedDatabase(db: D1Database) {
     db.prepare('INSERT INTO audit_events (id, actor, action, subject, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .bind('A-1', 'FLAIRO employee', 'Vendor claim', 'J-1048', 'Sparkle & Settle claimed J-1048; resident contact released.', stamp),
     db.prepare('INSERT INTO audit_events (id, actor, action, subject, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .bind('A-2', 'FLAIRO employee', 'Invoice trigger', 'J-1050', 'J-1050 passed service date and entered the Bluevine draft queue.', stamp),
+      .bind('A-2', 'FLAIRO employee', 'Invoice trigger', 'J-1050', 'J-1050 passed service date and entered the monthly vendor statement queue.', stamp),
     db.prepare('INSERT INTO audit_events (id, actor, action, subject, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .bind('A-3', 'FLAIRO employee', 'Mobile catalog', 'touch-up-painting', 'Move-out touch-up painting remains hidden from the resident app.', stamp),
   ]);
@@ -700,6 +786,7 @@ async function readState(db: D1Database) {
   const invoiceRows = await db.prepare('SELECT * FROM invoice_triggers ORDER BY created_at DESC, id DESC').all();
   const auditRows = await db.prepare('SELECT * FROM audit_events ORDER BY created_at DESC, id DESC LIMIT 20').all();
   const mobileSyncRow = await db.prepare('SELECT * FROM mobile_sync_state WHERE id = ?').bind('default').first<Record<string, unknown>>();
+  const rewardSettingsRow = await db.prepare('SELECT * FROM reward_program_settings WHERE id = ?').bind('default').first<Record<string, unknown>>();
 
   return {
     audit: auditRows.results.map((row) => ({
@@ -767,15 +854,36 @@ async function readState(db: D1Database) {
       };
     }),
     rewards: rewardRows.results.map((row) => ({
+      alertQueued: Boolean(row.alert_queued),
       communityId: String(row.community_id),
+      expirationDate: row.expires_at ? String(row.expires_at) : null,
       id: String(row.id),
       note: String(row.reason),
+      plusMember: Boolean(row.plus_member),
       points: Number(row.points),
+      redeemedInExpirationWindow: Boolean(row.redeemed_in_expiration_window),
       resident: String(row.resident_name),
       source: String(row.entry_type),
       status: String(row.status),
       value: dollarsFromCents(Number(row.dollar_value_cents)),
     })),
+    rewardSettings: {
+      activationRatePercent: Number(rewardSettingsRow?.activation_rate_percent ?? rewardSettings.activationRatePercent),
+      active30DayRatePercent: Number(rewardSettingsRow?.active_30_day_rate_percent ?? rewardSettings.active30DayRatePercent),
+      adoptionIndexPreviousMonth: Number(rewardSettingsRow?.adoption_index_previous_month ?? rewardSettings.adoptionIndexPreviousMonth),
+      avgCxRating: Number(rewardSettingsRow?.avg_cx_rating ?? rewardSettings.avgCxRating),
+      expirationMonths: Number(rewardSettingsRow?.expiration_months ?? rewardSettings.expirationMonths),
+      expirationReminderDays: Number(rewardSettingsRow?.expiration_reminder_days ?? rewardSettings.expirationReminderDays),
+      firstServiceConversionPercent: Number(rewardSettingsRow?.first_service_conversion_percent ?? rewardSettings.firstServiceConversionPercent),
+      minimumGoldBalance: Number(rewardSettingsRow?.minimum_gold_balance ?? rewardSettings.minimumGoldBalance),
+      plusMembershipMonthly: dollarsFromCents(Number(rewardSettingsRow?.plus_membership_monthly_cents ?? cents(rewardSettings.plusMembershipMonthly))),
+      plusOnlyAccrual: Boolean(rewardSettingsRow?.plus_only_accrual ?? rewardSettings.plusOnlyAccrual),
+      pointValueCents: Number(rewardSettingsRow?.point_value_cents ?? rewardSettings.pointValueCents),
+      redemptionCapPercent: Number(rewardSettingsRow?.redemption_cap_percent ?? rewardSettings.redemptionCapPercent),
+      registrationGrowthPercent: Number(rewardSettingsRow?.registration_growth_percent ?? rewardSettings.registrationGrowthPercent),
+      repeatUseRatePercent: Number(rewardSettingsRow?.repeat_use_rate_percent ?? rewardSettings.repeatUseRatePercent),
+      surveyResponseRatePercent: Number(rewardSettingsRow?.survey_response_rate_percent ?? rewardSettings.surveyResponseRatePercent),
+    },
     services: serviceRows.results.map((row) => ({
       category: String(row.category),
       id: String(row.id),
@@ -819,6 +927,31 @@ async function ensureMobileSyncState(db: D1Database) {
   const stamp = now();
   await db.prepare('INSERT OR IGNORE INTO mobile_sync_state (id, connection_status, last_checked_at, last_push_at, pending_changes, revision, last_push_summary, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     .bind('default', 'Live app bridge online', stamp, null, 0, 0, 'No mobile app push yet', stamp)
+    .run();
+}
+
+async function ensureRewardSettings(db: D1Database) {
+  const stamp = now();
+  await db.prepare('INSERT OR IGNORE INTO reward_program_settings (id, point_value_cents, redemption_cap_percent, plus_membership_monthly_cents, plus_only_accrual, minimum_gold_balance, expiration_months, expiration_reminder_days, adoption_index_previous_month, registration_growth_percent, activation_rate_percent, first_service_conversion_percent, active_30_day_rate_percent, repeat_use_rate_percent, survey_response_rate_percent, avg_cx_rating, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(
+      'default',
+      rewardSettings.pointValueCents,
+      rewardSettings.redemptionCapPercent,
+      cents(rewardSettings.plusMembershipMonthly),
+      rewardSettings.plusOnlyAccrual ? 1 : 0,
+      rewardSettings.minimumGoldBalance,
+      rewardSettings.expirationMonths,
+      rewardSettings.expirationReminderDays,
+      rewardSettings.adoptionIndexPreviousMonth,
+      rewardSettings.registrationGrowthPercent,
+      rewardSettings.activationRatePercent,
+      rewardSettings.firstServiceConversionPercent,
+      rewardSettings.active30DayRatePercent,
+      rewardSettings.repeatUseRatePercent,
+      rewardSettings.surveyResponseRatePercent,
+      rewardSettings.avgCxRating,
+      stamp,
+    )
     .run();
 }
 
@@ -932,8 +1065,13 @@ async function completeJob(jobId?: string) {
     env.DB.prepare('UPDATE job_orders SET task_status = ?, invoice_trigger_status = ?, payment_consult_status = ?, resident_paid_vendor = ?, vendor_payment_confirmed = ?, resident_payment_confirmed = ?, amount_paid_cents = ?, payment_date = ?, receipt_number = COALESCE(receipt_number, ?), updated_at = ? WHERE id = ?')
       .bind('Completed', 'Ready', 'Admin confirmed job complete and paid; resident survey queued', 1, 1, 1, cents(job.amount), stamp.slice(0, 10), 'Admin override', stamp, jobId),
   ]);
-  await env.DB.prepare('INSERT OR IGNORE INTO reward_ledger_entries (id, resident_name, community_id, request_id, entry_type, status, points, dollar_value_cents, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(`R-${Date.now()}`, job.resident, job.communityId, job.id, job.id, 'Available', job.points, cents(job.points / 100), `${job.service} completion verified`, stamp)
+  const settingsRow = await env.DB.prepare('SELECT point_value_cents, expiration_months FROM reward_program_settings WHERE id = ?')
+    .bind('default')
+    .first<{ point_value_cents: number; expiration_months: number }>();
+  const pointValueCents = Number(settingsRow?.point_value_cents ?? rewardSettings.pointValueCents);
+  const expirationDate = addMonthsDate(stamp.slice(0, 10), Number(settingsRow?.expiration_months ?? rewardSettings.expirationMonths));
+  await env.DB.prepare('INSERT OR IGNORE INTO reward_ledger_entries (id, resident_name, community_id, request_id, entry_type, status, points, dollar_value_cents, expires_at, plus_member, alert_queued, redeemed_in_expiration_window, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(`R-${Date.now()}`, job.resident, job.communityId, job.id, job.id, 'Available', job.points, Math.abs(job.points) * pointValueCents, expirationDate, 1, 0, 0, `${job.service} completion verified`, stamp)
     .run();
   await logEvent('Job completed', jobId, 'Job completed, payment confirmed, invoice readiness set, and resident survey queued.');
 }
@@ -1027,15 +1165,22 @@ async function triggerInvoice(jobId?: string) {
     await logEvent('Invoice blocked', jobId, 'A claimed vendor is required before creating an invoice trigger.');
     return;
   }
+  const existing = await env.DB.prepare('SELECT id FROM invoice_triggers WHERE job_order_id = ? AND status NOT IN (?, ?) LIMIT 1')
+    .bind(job.id, 'Hold', 'Paid')
+    .first<{ id: string }>();
+  if (existing) {
+    await logEvent('Invoice already queued', existing.id, `${job.id} is already attached to a monthly vendor statement.`);
+    return;
+  }
   const stamp = now();
   const invoiceId = `INV-Q-${Date.now().toString().slice(-5)}`;
   await env.DB.batch([
     env.DB.prepare('INSERT INTO invoice_triggers (id, job_order_id, vendor_id, amount_cents, status, bluevine_reference, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .bind(invoiceId, job.id, job.vendorId, cents(job.flairoFee), 'Draft queued', 'Bluevine draft requested', 'Net 7', stamp, stamp),
+      .bind(invoiceId, job.id, job.vendorId, cents(job.flairoFee), 'Draft queued', 'Added to vendor monthly statement', 'Net 7', stamp, stamp),
     env.DB.prepare('UPDATE job_orders SET invoice_trigger_status = ?, updated_at = ? WHERE id = ?')
       .bind('Draft queued', stamp, job.id),
   ]);
-  await logEvent('Bluevine invoice trigger', invoiceId, `Invoice draft queued for ${job.id}.`);
+  await logEvent('Invoice statement item', invoiceId, `${job.id} added to the vendor monthly statement.`);
 }
 
 async function processVendorMonth(vendorId?: string, monthKey?: string) {
@@ -1054,10 +1199,10 @@ async function processVendorMonth(vendorId?: string, monthKey?: string) {
     WHERE vendor_id = ?
       AND service_date >= ?
       AND service_date < ?
-      AND invoice_trigger_status != ?
+      AND invoice_trigger_status NOT IN (?, ?)
       AND (invoice_trigger_status IN (?, ?) OR task_status = ?)
   `)
-    .bind(vendorId, startDate, endDate, 'Sent', 'Ready', 'Draft queued', 'Completed')
+    .bind(vendorId, startDate, endDate, 'Sent', 'Paid', 'Ready', 'Draft queued', 'Completed')
     .all<Record<string, unknown>>();
   const missingInvoiceInserts: D1PreparedStatement[] = [];
 
@@ -1070,7 +1215,7 @@ async function processVendorMonth(vendorId?: string, monthKey?: string) {
     if (!existing) {
       missingInvoiceInserts.push(
         env.DB.prepare('INSERT INTO invoice_triggers (id, job_order_id, vendor_id, amount_cents, status, bluevine_reference, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-          .bind(`INV-M-${monthKey.replace('-', '')}-${jobId}`, jobId, vendorId, Number(row.flairo_fee_cents), 'Sent', 'Month-end invoice processed', 'Net 7', stamp, stamp),
+          .bind(`INV-M-${monthKey.replace('-', '')}-${jobId}`, jobId, vendorId, Number(row.flairo_fee_cents), 'Sent', 'Included on vendor monthly statement', 'Net 7', stamp, stamp),
       );
     }
   }
@@ -1086,14 +1231,15 @@ async function processVendorMonth(vendorId?: string, monthKey?: string) {
       WHERE vendor_id = ?
         AND service_date >= ?
         AND service_date < ?
-        AND invoice_trigger_status != ?
+        AND invoice_trigger_status NOT IN (?, ?)
         AND (invoice_trigger_status IN (?, ?) OR task_status = ?)
     `)
-      .bind('Sent', stamp, vendorId, startDate, endDate, 'Sent', 'Ready', 'Draft queued', 'Completed'),
+      .bind('Sent', stamp, vendorId, startDate, endDate, 'Sent', 'Paid', 'Ready', 'Draft queued', 'Completed'),
     env.DB.prepare(`
       UPDATE invoice_triggers
       SET status = ?, bluevine_reference = ?, updated_at = ?
       WHERE vendor_id = ?
+        AND status NOT IN (?, ?)
         AND job_order_id IN (
           SELECT id
           FROM job_orders
@@ -1102,19 +1248,222 @@ async function processVendorMonth(vendorId?: string, monthKey?: string) {
             AND service_date < ?
         )
     `)
-      .bind('Sent', 'Month-end invoice processed', stamp, vendorId, vendorId, startDate, endDate),
+      .bind('Sent', 'Included on vendor monthly statement', stamp, vendorId, 'Paid', 'Hold', vendorId, startDate, endDate),
   ]);
-  await logEvent('Vendor month processed', vendorId, `Month-end invoice processing completed for ${monthKey}.`);
+  await logEvent('Vendor month processed', vendorId, `Monthly vendor statement processed for ${monthKey}; job-level tally reset.`);
+}
+
+async function markVendorStatementPaid(vendorId?: string, monthKey?: string) {
+  if (!vendorId || !monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) return;
+  const [year, month] = monthKey.split('-').map(Number);
+  if (!year || !month || month < 1 || month > 12) return;
+
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  const startDate = `${monthKey}-01`;
+  const endDate = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
+  const stamp = now();
+
+  await env.DB.batch([
+    env.DB.prepare(`
+      UPDATE invoice_triggers
+      SET status = ?, bluevine_reference = ?, updated_at = ?
+      WHERE vendor_id = ?
+        AND status NOT IN (?, ?)
+        AND (
+          job_order_id IN (
+            SELECT id
+            FROM job_orders
+            WHERE vendor_id = ?
+              AND service_date >= ?
+              AND service_date < ?
+          )
+          OR (due_date >= ? AND due_date < ?)
+        )
+    `)
+      .bind('Paid', 'Manual vendor statement payment recorded', stamp, vendorId, 'Paid', 'Hold', vendorId, startDate, endDate, startDate, endDate),
+    env.DB.prepare(`
+      UPDATE job_orders
+      SET invoice_trigger_status = ?, updated_at = ?
+      WHERE vendor_id = ?
+        AND service_date >= ?
+        AND service_date < ?
+        AND invoice_trigger_status IN (?, ?, ?)
+    `)
+      .bind('Paid', stamp, vendorId, startDate, endDate, 'Ready', 'Draft queued', 'Sent'),
+  ]);
+  await logEvent('Vendor statement paid', vendorId, `Manual payment recorded for ${monthKey} vendor statement.`);
+}
+
+async function updateRewardSettings(payload: Record<string, string | number | boolean | null>) {
+  const stamp = now();
+  await env.DB.prepare(`
+    UPDATE reward_program_settings
+    SET point_value_cents = ?,
+        redemption_cap_percent = ?,
+        plus_membership_monthly_cents = ?,
+        plus_only_accrual = ?,
+        minimum_gold_balance = ?,
+        expiration_months = ?,
+        expiration_reminder_days = ?,
+        adoption_index_previous_month = ?,
+        registration_growth_percent = ?,
+        activation_rate_percent = ?,
+        first_service_conversion_percent = ?,
+        active_30_day_rate_percent = ?,
+        repeat_use_rate_percent = ?,
+        survey_response_rate_percent = ?,
+        avg_cx_rating = ?,
+        updated_at = ?
+    WHERE id = ?
+  `)
+    .bind(
+      numericPayload(payload, 'pointValueCents', rewardSettings.pointValueCents),
+      numericPayload(payload, 'redemptionCapPercent', rewardSettings.redemptionCapPercent),
+      cents(numericPayload(payload, 'plusMembershipMonthly', rewardSettings.plusMembershipMonthly)),
+      booleanPayload(payload, 'plusOnlyAccrual', rewardSettings.plusOnlyAccrual) ? 1 : 0,
+      numericPayload(payload, 'minimumGoldBalance', rewardSettings.minimumGoldBalance),
+      numericPayload(payload, 'expirationMonths', rewardSettings.expirationMonths),
+      numericPayload(payload, 'expirationReminderDays', rewardSettings.expirationReminderDays),
+      numericPayload(payload, 'adoptionIndexPreviousMonth', rewardSettings.adoptionIndexPreviousMonth),
+      numericPayload(payload, 'registrationGrowthPercent', rewardSettings.registrationGrowthPercent),
+      numericPayload(payload, 'activationRatePercent', rewardSettings.activationRatePercent),
+      numericPayload(payload, 'firstServiceConversionPercent', rewardSettings.firstServiceConversionPercent),
+      numericPayload(payload, 'active30DayRatePercent', rewardSettings.active30DayRatePercent),
+      numericPayload(payload, 'repeatUseRatePercent', rewardSettings.repeatUseRatePercent),
+      numericPayload(payload, 'surveyResponseRatePercent', rewardSettings.surveyResponseRatePercent),
+      numericPayload(payload, 'avgCxRating', rewardSettings.avgCxRating),
+      stamp,
+      'default',
+    )
+    .run();
+  await logEvent('Plume Point rules', 'reward-program', 'Editable Plume Point controls saved for the resident mobile app.');
+}
+
+async function adminAdjustPlumePoints(payload: Record<string, string | number | boolean | null>) {
+  const resident = String(payload.resident ?? '').trim();
+  const communityId = String(payload.communityId ?? '').trim();
+  const status = normalizeRewardStatus(String(payload.status ?? 'Available'));
+  const inputPoints = Math.round(numericPayload(payload, 'points', 0));
+  if (!resident || !communityId || !inputPoints) return;
+
+  const settingsRow = await env.DB.prepare('SELECT point_value_cents FROM reward_program_settings WHERE id = ?')
+    .bind('default')
+    .first<{ point_value_cents: number }>();
+  const pointValueCents = Number(settingsRow?.point_value_cents ?? rewardSettings.pointValueCents);
+  const storedPoints = status === 'Available' || status === 'Pending'
+    ? Math.abs(inputPoints)
+    : -Math.abs(inputPoints);
+  const dollarValueCents = storedPoints < 0
+    ? -Math.abs(storedPoints) * pointValueCents
+    : Math.abs(storedPoints) * pointValueCents;
+  const stamp = now();
+
+  await env.DB.prepare('INSERT INTO reward_ledger_entries (id, resident_name, community_id, request_id, entry_type, status, points, dollar_value_cents, expires_at, plus_member, alert_queued, redeemed_in_expiration_window, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(
+      `R-${Date.now()}`,
+      resident,
+      communityId,
+      null,
+      'Admin',
+      status,
+      storedPoints,
+      dollarValueCents,
+      payload.expirationDate ? String(payload.expirationDate) : null,
+      1,
+      0,
+      0,
+      String(payload.note ?? `${status} by FLAIRO ADMIN`),
+      stamp,
+    )
+    .run();
+  await logEvent('Plume Point adjustment', resident, `${storedPoints.toLocaleString()} Plume Points recorded by FLAIRO ADMIN.`);
+}
+
+async function runExpirationBatch(reminderDays: number) {
+  const settingsRow = await env.DB.prepare('SELECT point_value_cents FROM reward_program_settings WHERE id = ?')
+    .bind('default')
+    .first<{ point_value_cents: number }>();
+  const pointValueCents = Number(settingsRow?.point_value_cents ?? rewardSettings.pointValueCents);
+  const activeRows = await env.DB.prepare('SELECT id, points, expires_at FROM reward_ledger_entries WHERE status IN (?, ?) AND expires_at IS NOT NULL')
+    .bind('Available', 'Pending')
+    .all<{ id: string; points: number; expires_at: string }>();
+  const stamp = now();
+  const today = new Date(`${stamp.slice(0, 10)}T00:00:00Z`).getTime();
+  const updates: D1PreparedStatement[] = [];
+  let alertCount = 0;
+  let expiredCount = 0;
+
+  activeRows.results.forEach((row) => {
+    const expiration = new Date(`${row.expires_at}T00:00:00Z`).getTime();
+    if (Number.isNaN(expiration)) return;
+    const daysUntilExpiration = Math.ceil((expiration - today) / (24 * 60 * 60 * 1000));
+    if (daysUntilExpiration <= 0) {
+      expiredCount += 1;
+      updates.push(
+        env.DB.prepare('UPDATE reward_ledger_entries SET status = ?, dollar_value_cents = ?, reason = reason || ?, alert_queued = ?, created_at = created_at WHERE id = ?')
+          .bind('Expired', -Math.abs(Number(row.points)) * pointValueCents, ' / expired through month-end batch', 1, row.id),
+      );
+      return;
+    }
+
+    if (daysUntilExpiration <= reminderDays) {
+      alertCount += 1;
+      updates.push(
+        env.DB.prepare('UPDATE reward_ledger_entries SET alert_queued = ? WHERE id = ?')
+          .bind(1, row.id),
+      );
+    }
+  });
+
+  if (updates.length) {
+    await env.DB.batch(updates);
+  }
+
+  await logEvent(
+    'Expiration batch',
+    'reward-program',
+    `${alertCount} mobile push alerts queued with "You have Plume Points expiring soon, redeem on your next service today!" and ${expiredCount} entries converted to expired statement value.`,
+  );
 }
 
 async function logEvent(action: string, subject: string, detail: string) {
   await env.DB.prepare('INSERT INTO audit_events (id, actor, action, subject, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .bind(`A-${Date.now()}-${Math.floor(Math.random() * 1000)}`, 'FLAIRO Administrator', action, subject, detail, now())
+    .bind(`A-${Date.now()}-${Math.floor(Math.random() * 1000)}`, 'FLAIRO ADMIN', action, subject, detail, now())
     .run();
 }
 
 function cents(value: number) {
   return Math.round(value * 100);
+}
+
+function numericPayload(payload: Record<string, string | number | boolean | null>, key: string, fallback: number) {
+  const value = payload[key];
+  if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function textPayload(payload: Record<string, string | number | boolean | null>, key: string) {
+  const value = payload[key];
+  if (value === null || value === undefined) return undefined;
+  return String(value);
+}
+
+function booleanPayload(payload: Record<string, string | number | boolean | null>, key: string, fallback: boolean) {
+  const value = payload[key];
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') return value === 'true' || value === '1';
+  return fallback;
+}
+
+function normalizeRewardStatus(value: string) {
+  if (['Pending', 'Available', 'Redeemed', 'Reversed', 'Expired'].includes(value)) return value;
+  return 'Available';
 }
 
 function dollarsFromCents(value: number) {
