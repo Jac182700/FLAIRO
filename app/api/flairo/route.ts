@@ -43,6 +43,7 @@ type VendorSeed = {
   feePercent: number;
   stage: string;
   rating: number;
+  preferred: boolean;
 };
 
 type JobSeed = {
@@ -70,6 +71,12 @@ type JobSeed = {
   residentInfoReleased: boolean;
   vendorConfirmed: boolean;
   paymentConsult: string;
+  vendorPaymentConfirmed: boolean;
+  residentPaymentConfirmed: boolean;
+  amountPaid: number | null;
+  paymentDate: string | null;
+  receiptNumber: string | null;
+  paymentInquiryStatus: string | null;
   invoiceStatus: string;
 };
 
@@ -229,6 +236,7 @@ const vendors: VendorSeed[] = [
     feePercent: 10,
     stage: 'Board access active',
     rating: 4.8,
+    preferred: true,
   },
   {
     id: 'pink-palm',
@@ -246,6 +254,7 @@ const vendors: VendorSeed[] = [
     feePercent: 10,
     stage: 'Insurance renewal review',
     rating: 4.7,
+    preferred: false,
   },
   {
     id: 'porter',
@@ -263,6 +272,7 @@ const vendors: VendorSeed[] = [
     feePercent: 10,
     stage: 'License upload needed',
     rating: 4.5,
+    preferred: true,
   },
   {
     id: 'hex-key',
@@ -280,6 +290,7 @@ const vendors: VendorSeed[] = [
     feePercent: 10,
     stage: 'Board access active',
     rating: 4.6,
+    preferred: false,
   },
 ];
 
@@ -309,6 +320,12 @@ const jobs: JobSeed[] = [
     residentInfoReleased: true,
     vendorConfirmed: false,
     paymentConsult: 'Vendor to confirm resident payment method',
+    vendorPaymentConfirmed: false,
+    residentPaymentConfirmed: false,
+    amountPaid: null,
+    paymentDate: null,
+    receiptNumber: null,
+    paymentInquiryStatus: null,
     invoiceStatus: 'Waiting',
   },
   {
@@ -336,6 +353,12 @@ const jobs: JobSeed[] = [
     residentInfoReleased: false,
     vendorConfirmed: false,
     paymentConsult: 'Not started',
+    vendorPaymentConfirmed: false,
+    residentPaymentConfirmed: false,
+    amountPaid: null,
+    paymentDate: null,
+    receiptNumber: null,
+    paymentInquiryStatus: null,
     invoiceStatus: 'Waiting',
   },
   {
@@ -363,6 +386,12 @@ const jobs: JobSeed[] = [
     residentInfoReleased: true,
     vendorConfirmed: true,
     paymentConsult: 'Resident and vendor confirmed direct payment',
+    vendorPaymentConfirmed: true,
+    residentPaymentConfirmed: true,
+    amountPaid: 27,
+    paymentDate: '2026-08-26',
+    receiptNumber: 'RCPT-7718',
+    paymentInquiryStatus: null,
     invoiceStatus: 'Ready',
   },
   {
@@ -390,6 +419,12 @@ const jobs: JobSeed[] = [
     residentInfoReleased: false,
     vendorConfirmed: false,
     paymentConsult: 'Not started',
+    vendorPaymentConfirmed: false,
+    residentPaymentConfirmed: false,
+    amountPaid: null,
+    paymentDate: null,
+    receiptNumber: null,
+    paymentInquiryStatus: null,
     invoiceStatus: 'Waiting',
   },
 ];
@@ -505,6 +540,26 @@ export async function POST(request: Request) {
         await completeJob(payload.jobId);
         stageMobileChange = true;
         break;
+      case 'reactivate_job':
+        await reactivateJob(payload.jobId);
+        stageMobileChange = true;
+        break;
+      case 'confirm_vendor_payment':
+        await confirmVendorPayment(payload.jobId);
+        stageMobileChange = true;
+        break;
+      case 'confirm_resident_payment':
+        await confirmResidentPayment(payload.jobId);
+        stageMobileChange = true;
+        break;
+      case 'submit_payment_inquiry':
+        await submitPaymentInquiry(payload.jobId);
+        stageMobileChange = true;
+        break;
+      case 'create_manual_job':
+        await createManualJob(payload);
+        stageMobileChange = true;
+        break;
       case 'trigger_invoice':
         await triggerInvoice(payload.jobId);
         stageMobileChange = true;
@@ -542,10 +597,10 @@ async function initializeDatabase(db: D1Database) {
   await db.batch([
     db.prepare('CREATE TABLE IF NOT EXISTS communities (id TEXT PRIMARY KEY, name TEXT NOT NULL, market TEXT NOT NULL, address TEXT NOT NULL, property_manager TEXT NOT NULL, homes INTEGER NOT NULL, occupied_homes INTEGER NOT NULL, plus_enabled INTEGER NOT NULL DEFAULT 0, plus_members INTEGER NOT NULL DEFAULT 0, service_penetration REAL NOT NULL DEFAULT 0, net_income_cents INTEGER NOT NULL DEFAULT 0, statement_status TEXT NOT NULL DEFAULT "Draft", created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS services (id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, mobile_visible INTEGER NOT NULL DEFAULT 1, standard_price_cents INTEGER NOT NULL, plus_price_cents INTEGER NOT NULL, points_rule TEXT NOT NULL, vendor_pool_rule TEXT NOT NULL, updated_at TEXT NOT NULL)'),
-    db.prepare('CREATE TABLE IF NOT EXISTS vendors (id TEXT PRIMARY KEY, business_name TEXT NOT NULL, primary_contact TEXT NOT NULL, email TEXT NOT NULL, phone TEXT NOT NULL, markets TEXT NOT NULL, services TEXT NOT NULL, onboarding_stage TEXT NOT NULL, compliance_status TEXT NOT NULL, board_access INTEGER NOT NULL DEFAULT 0, insurance_status TEXT NOT NULL DEFAULT "Needs upload", license_status TEXT NOT NULL DEFAULT "Needs upload", w9_status TEXT NOT NULL DEFAULT "Needs upload", flairo_fee_percent REAL NOT NULL DEFAULT 10, rating REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
+    db.prepare('CREATE TABLE IF NOT EXISTS vendors (id TEXT PRIMARY KEY, business_name TEXT NOT NULL, primary_contact TEXT NOT NULL, email TEXT NOT NULL, phone TEXT NOT NULL, markets TEXT NOT NULL, services TEXT NOT NULL, onboarding_stage TEXT NOT NULL, compliance_status TEXT NOT NULL, board_access INTEGER NOT NULL DEFAULT 0, preferred_vendor INTEGER NOT NULL DEFAULT 0, insurance_status TEXT NOT NULL DEFAULT "Needs upload", license_status TEXT NOT NULL DEFAULT "Needs upload", w9_status TEXT NOT NULL DEFAULT "Needs upload", flairo_fee_percent REAL NOT NULL DEFAULT 10, rating REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS vendor_documents (id TEXT PRIMARY KEY, vendor_id TEXT NOT NULL, document_type TEXT NOT NULL, status TEXT NOT NULL, storage_key TEXT, expires_at TEXT, reviewed_by TEXT, reviewed_at TEXT, created_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS resident_requests (id TEXT PRIMARY KEY, resident_name TEXT NOT NULL, resident_email TEXT NOT NULL, resident_phone TEXT NOT NULL, community_id TEXT NOT NULL, market TEXT NOT NULL, unit TEXT NOT NULL, home_profile TEXT NOT NULL, service_name TEXT NOT NULL, preferred_window TEXT NOT NULL, board_status TEXT NOT NULL, visible_to_vendors INTEGER NOT NULL DEFAULT 1, resident_info_released INTEGER NOT NULL DEFAULT 0, requested_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
-    db.prepare('CREATE TABLE IF NOT EXISTS job_orders (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, vendor_id TEXT, task_status TEXT NOT NULL, service_date TEXT, schedule_confirmed_at TEXT, vendor_confirmed_at TEXT, claimed_at TEXT, schedule_due_at TEXT, payment_consult_status TEXT NOT NULL DEFAULT "Not started", resident_paid_vendor INTEGER NOT NULL DEFAULT 0, service_amount_cents INTEGER NOT NULL, flairo_fee_cents INTEGER NOT NULL, points INTEGER NOT NULL DEFAULT 0, invoice_trigger_status TEXT NOT NULL DEFAULT "Waiting", created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
+    db.prepare('CREATE TABLE IF NOT EXISTS job_orders (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, vendor_id TEXT, task_status TEXT NOT NULL, service_date TEXT, schedule_confirmed_at TEXT, vendor_confirmed_at TEXT, claimed_at TEXT, schedule_due_at TEXT, payment_consult_status TEXT NOT NULL DEFAULT "Not started", resident_paid_vendor INTEGER NOT NULL DEFAULT 0, vendor_payment_confirmed INTEGER NOT NULL DEFAULT 0, resident_payment_confirmed INTEGER NOT NULL DEFAULT 0, amount_paid_cents INTEGER, payment_date TEXT, receipt_number TEXT, payment_inquiry_status TEXT, service_amount_cents INTEGER NOT NULL, flairo_fee_cents INTEGER NOT NULL, points INTEGER NOT NULL DEFAULT 0, invoice_trigger_status TEXT NOT NULL DEFAULT "Waiting", created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS reward_ledger_entries (id TEXT PRIMARY KEY, resident_name TEXT NOT NULL, community_id TEXT NOT NULL, request_id TEXT, entry_type TEXT NOT NULL, status TEXT NOT NULL, points INTEGER NOT NULL, dollar_value_cents INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL, created_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS invoice_triggers (id TEXT PRIMARY KEY, job_order_id TEXT NOT NULL, vendor_id TEXT NOT NULL, amount_cents INTEGER NOT NULL, status TEXT NOT NULL, bluevine_reference TEXT, due_date TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS mobile_sync_state (id TEXT PRIMARY KEY, connection_status TEXT NOT NULL, last_checked_at TEXT NOT NULL, last_push_at TEXT, pending_changes INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0, last_push_summary TEXT NOT NULL DEFAULT "No mobile app push yet", updated_at TEXT NOT NULL)'),
@@ -560,6 +615,16 @@ async function initializeDatabase(db: D1Database) {
   ]);
   await ensureColumn(db, 'job_orders', 'claimed_at', 'TEXT');
   await ensureColumn(db, 'job_orders', 'schedule_due_at', 'TEXT');
+  await ensureColumn(db, 'vendors', 'preferred_vendor', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(db, 'job_orders', 'vendor_payment_confirmed', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(db, 'job_orders', 'resident_payment_confirmed', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(db, 'job_orders', 'amount_paid_cents', 'INTEGER');
+  await ensureColumn(db, 'job_orders', 'payment_date', 'TEXT');
+  await ensureColumn(db, 'job_orders', 'receipt_number', 'TEXT');
+  await ensureColumn(db, 'job_orders', 'payment_inquiry_status', 'TEXT');
+  await db.prepare('UPDATE vendors SET preferred_vendor = 1 WHERE id IN (?, ?)')
+    .bind('sparkle', 'porter')
+    .run();
   await ensureMobileSyncState(db);
 }
 
@@ -588,8 +653,8 @@ async function seedDatabase(db: D1Database) {
   );
   await db.batch(
     vendors.map((vendor) =>
-      db.prepare('INSERT INTO vendors (id, business_name, primary_contact, email, phone, markets, services, onboarding_stage, compliance_status, board_access, insurance_status, license_status, w9_status, flairo_fee_percent, rating, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(vendor.id, vendor.name, vendor.contact, vendor.email, vendor.phone, JSON.stringify(vendor.markets), JSON.stringify(vendor.services), vendor.stage, vendor.status, vendor.boardAccess ? 1 : 0, vendor.insurance, vendor.license, vendor.w9, vendor.feePercent, vendor.rating, stamp, stamp),
+      db.prepare('INSERT INTO vendors (id, business_name, primary_contact, email, phone, markets, services, onboarding_stage, compliance_status, board_access, preferred_vendor, insurance_status, license_status, w9_status, flairo_fee_percent, rating, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(vendor.id, vendor.name, vendor.contact, vendor.email, vendor.phone, JSON.stringify(vendor.markets), JSON.stringify(vendor.services), vendor.stage, vendor.status, vendor.boardAccess ? 1 : 0, vendor.preferred ? 1 : 0, vendor.insurance, vendor.license, vendor.w9, vendor.feePercent, vendor.rating, stamp, stamp),
     ),
   );
   await db.batch(
@@ -600,8 +665,8 @@ async function seedDatabase(db: D1Database) {
   );
   await db.batch(
     jobs.map((job) =>
-      db.prepare('INSERT INTO job_orders (id, request_id, vendor_id, task_status, service_date, schedule_confirmed_at, vendor_confirmed_at, claimed_at, schedule_due_at, payment_consult_status, resident_paid_vendor, service_amount_cents, flairo_fee_cents, points, invoice_trigger_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(job.id, job.id, job.vendorId, job.boardStatus, job.serviceDate, job.scheduledAt, job.vendorConfirmed ? job.scheduledAt ?? stamp : null, job.claimedAt, job.scheduleDueAt, job.paymentConsult, job.vendorConfirmed ? 1 : 0, cents(job.amount), cents(job.flairoFee), job.points, job.invoiceStatus, stamp, stamp),
+      db.prepare('INSERT INTO job_orders (id, request_id, vendor_id, task_status, service_date, schedule_confirmed_at, vendor_confirmed_at, claimed_at, schedule_due_at, payment_consult_status, resident_paid_vendor, vendor_payment_confirmed, resident_payment_confirmed, amount_paid_cents, payment_date, receipt_number, payment_inquiry_status, service_amount_cents, flairo_fee_cents, points, invoice_trigger_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(job.id, job.id, job.vendorId, job.boardStatus, job.serviceDate, job.scheduledAt, job.vendorConfirmed ? job.scheduledAt ?? stamp : null, job.claimedAt, job.scheduleDueAt, job.paymentConsult, job.vendorPaymentConfirmed && job.residentPaymentConfirmed ? 1 : 0, job.vendorPaymentConfirmed ? 1 : 0, job.residentPaymentConfirmed ? 1 : 0, job.amountPaid === null ? null : cents(job.amountPaid), job.paymentDate, job.receiptNumber, job.paymentInquiryStatus, cents(job.amount), cents(job.flairoFee), job.points, job.invoiceStatus, stamp, stamp),
     ),
   );
   await db.batch(
@@ -630,7 +695,7 @@ async function readState(db: D1Database) {
   const communityRows = await db.prepare('SELECT * FROM communities ORDER BY name').all();
   const serviceRows = await db.prepare('SELECT * FROM services ORDER BY category, name').all();
   const vendorRows = await db.prepare('SELECT * FROM vendors ORDER BY business_name').all();
-  const jobRows = await db.prepare('SELECT r.*, j.vendor_id, j.task_status, j.service_date, j.schedule_confirmed_at, j.vendor_confirmed_at, j.claimed_at, j.schedule_due_at, j.payment_consult_status, j.resident_paid_vendor, j.service_amount_cents, j.flairo_fee_cents, j.points, j.invoice_trigger_status FROM resident_requests r JOIN job_orders j ON j.request_id = r.id ORDER BY r.id DESC').all();
+  const jobRows = await db.prepare('SELECT r.*, j.vendor_id, j.task_status, j.service_date, j.schedule_confirmed_at, j.vendor_confirmed_at, j.claimed_at, j.schedule_due_at, j.payment_consult_status, j.resident_paid_vendor, j.vendor_payment_confirmed, j.resident_payment_confirmed, j.amount_paid_cents, j.payment_date, j.receipt_number, j.payment_inquiry_status, j.service_amount_cents, j.flairo_fee_cents, j.points, j.invoice_trigger_status FROM resident_requests r JOIN job_orders j ON j.request_id = r.id ORDER BY r.id DESC').all();
   const rewardRows = await db.prepare('SELECT * FROM reward_ledger_entries ORDER BY created_at DESC, id DESC').all();
   const invoiceRows = await db.prepare('SELECT * FROM invoice_triggers ORDER BY created_at DESC, id DESC').all();
   const auditRows = await db.prepare('SELECT * FROM audit_events ORDER BY created_at DESC, id DESC LIMIT 20').all();
@@ -665,33 +730,42 @@ async function readState(db: D1Database) {
       status: String(row.status),
       vendorId: String(row.vendor_id),
     })),
-    jobs: jobRows.results.map((row) => ({
-      amount: dollarsFromCents(Number(row.service_amount_cents)),
-      boardStatus: String(row.task_status),
-      communityId: String(row.community_id),
-      email: String(row.resident_email),
-      flairoFee: dollarsFromCents(Number(row.flairo_fee_cents)),
-      homeProfile: String(row.home_profile),
-      id: String(row.id),
-      invoiceStatus: String(row.invoice_trigger_status),
-      market: String(row.market),
-	      paymentConsult: String(row.payment_consult_status),
-	      phone: String(row.resident_phone),
-	      points: Number(row.points),
-	      preferredWindow: String(row.preferred_window),
-	      claimedAt: row.claimed_at ? String(row.claimed_at) : null,
-	      requestedAt: String(row.requested_at),
-	      resident: String(row.resident_name),
-	      residentInfoReleased: Boolean(row.resident_info_released),
-	      scheduleDueAt: row.schedule_due_at ? String(row.schedule_due_at) : null,
-	      scheduledAt: row.schedule_confirmed_at ? String(row.schedule_confirmed_at) : null,
-	      service: String(row.service_name),
-      serviceDate: String(row.service_date ?? ''),
-      unit: String(row.unit),
-      vendorConfirmed: Boolean(row.vendor_confirmed_at),
-      vendorId: row.vendor_id ? String(row.vendor_id) : null,
-      visibleToVendors: Boolean(row.visible_to_vendors),
-    })),
+    jobs: jobRows.results.map((row) => {
+      const legacyPaid = Boolean(row.resident_paid_vendor);
+      return {
+        amount: dollarsFromCents(Number(row.service_amount_cents)),
+        amountPaid: row.amount_paid_cents === null || row.amount_paid_cents === undefined ? null : dollarsFromCents(Number(row.amount_paid_cents)),
+        boardStatus: String(row.task_status),
+        claimedAt: row.claimed_at ? String(row.claimed_at) : null,
+        communityId: String(row.community_id),
+        email: String(row.resident_email),
+        flairoFee: dollarsFromCents(Number(row.flairo_fee_cents)),
+        homeProfile: String(row.home_profile),
+        id: String(row.id),
+        invoiceStatus: String(row.invoice_trigger_status),
+        market: String(row.market),
+        paymentConsult: String(row.payment_consult_status),
+        paymentDate: row.payment_date ? String(row.payment_date) : null,
+        paymentInquiryStatus: row.payment_inquiry_status ? String(row.payment_inquiry_status) : null,
+        phone: String(row.resident_phone),
+        points: Number(row.points),
+        preferredWindow: String(row.preferred_window),
+        receiptNumber: row.receipt_number ? String(row.receipt_number) : null,
+        requestedAt: String(row.requested_at),
+        resident: String(row.resident_name),
+        residentInfoReleased: Boolean(row.resident_info_released),
+        residentPaymentConfirmed: Boolean(row.resident_payment_confirmed) || legacyPaid,
+        scheduleDueAt: row.schedule_due_at ? String(row.schedule_due_at) : null,
+        scheduledAt: row.schedule_confirmed_at ? String(row.schedule_confirmed_at) : null,
+        service: String(row.service_name),
+        serviceDate: String(row.service_date ?? ''),
+        unit: String(row.unit),
+        vendorConfirmed: Boolean(row.vendor_confirmed_at),
+        vendorId: row.vendor_id ? String(row.vendor_id) : null,
+        vendorPaymentConfirmed: Boolean(row.vendor_payment_confirmed) || legacyPaid,
+        visibleToVendors: Boolean(row.visible_to_vendors),
+      };
+    }),
     rewards: rewardRows.results.map((row) => ({
       communityId: String(row.community_id),
       id: String(row.id),
@@ -723,6 +797,7 @@ async function readState(db: D1Database) {
       markets: parseJsonArray(String(row.markets)),
       name: String(row.business_name),
       phone: String(row.phone),
+      preferred: Boolean(row.preferred_vendor),
       rating: Number(row.rating),
       services: parseJsonArray(String(row.services)),
       stage: String(row.onboarding_stage),
@@ -811,12 +886,14 @@ async function claimJob(jobId?: string) {
   if (!job) return;
   const stamp = now();
   const scheduleDueAt = addHours(stamp, 24);
-  const vendor = state.vendors.find(
-    (candidate) =>
-      candidate.boardAccess &&
-      candidate.markets.includes(job.market) &&
-      candidate.services.includes(job.service),
-  );
+  const vendor = state.vendors
+    .filter(
+      (candidate) =>
+        candidate.boardAccess &&
+        candidate.markets.includes(job.market) &&
+        candidate.services.includes(job.service),
+    )
+    .sort(sortVendorsForBoard)[0];
   if (!vendor) {
     await logEvent('Claim blocked', jobId, 'No compliant vendor matched the request market and service.');
     return;
@@ -825,8 +902,8 @@ async function claimJob(jobId?: string) {
   await env.DB.batch([
     env.DB.prepare('UPDATE resident_requests SET board_status = ?, visible_to_vendors = ?, resident_info_released = ?, updated_at = ? WHERE id = ?')
       .bind('Claimed', 0, 1, stamp, jobId),
-    env.DB.prepare('UPDATE job_orders SET vendor_id = ?, task_status = ?, claimed_at = ?, schedule_due_at = ?, schedule_confirmed_at = ?, vendor_confirmed_at = ?, payment_consult_status = ?, updated_at = ? WHERE id = ?')
-      .bind(vendor.id, 'Claimed', stamp, scheduleDueAt, null, null, 'Resident contact released; vendor to schedule and consult on payment', stamp, jobId),
+    env.DB.prepare('UPDATE job_orders SET vendor_id = ?, task_status = ?, claimed_at = ?, schedule_due_at = ?, schedule_confirmed_at = ?, vendor_confirmed_at = ?, payment_consult_status = ?, resident_paid_vendor = ?, vendor_payment_confirmed = ?, resident_payment_confirmed = ?, amount_paid_cents = ?, payment_date = ?, receipt_number = ?, payment_inquiry_status = ?, updated_at = ? WHERE id = ?')
+      .bind(vendor.id, 'Claimed', stamp, scheduleDueAt, null, null, 'Resident contact released; vendor to schedule and consult on payment', 0, 0, 0, null, null, null, null, stamp, jobId),
   ]);
   await logEvent('Vendor claim', jobId, `${vendor.name} claimed ${jobId}; job removed from vendor board.`);
 }
@@ -837,10 +914,10 @@ async function confirmSchedule(jobId?: string) {
   await env.DB.batch([
     env.DB.prepare('UPDATE resident_requests SET board_status = ?, updated_at = ? WHERE id = ?')
       .bind('Scheduled', stamp, jobId),
-    env.DB.prepare('UPDATE job_orders SET task_status = ?, schedule_confirmed_at = ?, vendor_confirmed_at = ?, resident_paid_vendor = ?, payment_consult_status = ?, updated_at = ? WHERE id = ?')
-      .bind('Scheduled', stamp, stamp, 1, 'Resident and vendor confirmed direct payment plan', stamp, jobId),
+    env.DB.prepare('UPDATE job_orders SET task_status = ?, schedule_confirmed_at = ?, vendor_confirmed_at = ?, payment_consult_status = ?, updated_at = ? WHERE id = ?')
+      .bind('Scheduled', stamp, stamp, 'Scheduled; direct vendor payment still needs resident and vendor confirmation', stamp, jobId),
   ]);
-  await logEvent('Schedule confirmed', jobId, 'Vendor confirmed booking schedule in the open task portal.');
+  await logEvent('Schedule confirmed', jobId, 'Admin confirmed booking schedule and pushed scheduling details to the mobile workflow.');
 }
 
 async function completeJob(jobId?: string) {
@@ -849,13 +926,97 @@ async function completeJob(jobId?: string) {
   const job = state.jobs.find((item) => item.id === jobId);
   if (!job) return;
   const stamp = now();
-  await env.DB.prepare('UPDATE job_orders SET task_status = ?, invoice_trigger_status = ?, payment_consult_status = ?, updated_at = ? WHERE id = ?')
-    .bind('Completed', 'Ready', 'Service date passed; ready for FLAIRO fee invoice', stamp, jobId)
-    .run();
+  await env.DB.batch([
+    env.DB.prepare('UPDATE resident_requests SET board_status = ?, updated_at = ? WHERE id = ?')
+      .bind('Completed', stamp, jobId),
+    env.DB.prepare('UPDATE job_orders SET task_status = ?, invoice_trigger_status = ?, payment_consult_status = ?, resident_paid_vendor = ?, vendor_payment_confirmed = ?, resident_payment_confirmed = ?, amount_paid_cents = ?, payment_date = ?, receipt_number = COALESCE(receipt_number, ?), updated_at = ? WHERE id = ?')
+      .bind('Completed', 'Ready', 'Admin confirmed job complete and paid; resident survey queued', 1, 1, 1, cents(job.amount), stamp.slice(0, 10), 'Admin override', stamp, jobId),
+  ]);
   await env.DB.prepare('INSERT OR IGNORE INTO reward_ledger_entries (id, resident_name, community_id, request_id, entry_type, status, points, dollar_value_cents, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(`R-${Date.now()}`, job.resident, job.communityId, job.id, job.id, 'Available', job.points, cents(job.points / 100), `${job.service} completion verified`, stamp)
     .run();
-  await logEvent('Job completed', jobId, 'Job completed and moved into invoice-ready status.');
+  await logEvent('Job completed', jobId, 'Job completed, payment confirmed, invoice readiness set, and resident survey queued.');
+}
+
+async function reactivateJob(jobId?: string) {
+  if (!jobId) return;
+  const stamp = now();
+  const job = await env.DB.prepare('SELECT vendor_id FROM job_orders WHERE id = ? LIMIT 1')
+    .bind(jobId)
+    .first<{ vendor_id: string | null }>();
+  if (!job?.vendor_id) {
+    await logEvent('Reactivation blocked', jobId, 'A claimed vendor is required before releasing a job back to the vendor board.');
+    return;
+  }
+
+  await env.DB.batch([
+    env.DB.prepare('UPDATE resident_requests SET board_status = ?, visible_to_vendors = ?, resident_info_released = ?, updated_at = ? WHERE id = ?')
+      .bind('Open', 1, 0, stamp, jobId),
+    env.DB.prepare('UPDATE job_orders SET vendor_id = ?, task_status = ?, schedule_confirmed_at = ?, vendor_confirmed_at = ?, claimed_at = ?, schedule_due_at = ?, payment_consult_status = ?, resident_paid_vendor = ?, vendor_payment_confirmed = ?, resident_payment_confirmed = ?, amount_paid_cents = ?, payment_date = ?, receipt_number = ?, payment_inquiry_status = ?, invoice_trigger_status = ?, updated_at = ? WHERE id = ?')
+      .bind(null, 'Open', null, null, null, null, 'Re-activated; matching vendors nudged in the mobile app', 0, 0, 0, null, null, null, null, 'Waiting', stamp, jobId),
+  ]);
+  await logEvent('Request re-activated', jobId, 'Claimed vendor removed; job is visible to matching vendors again and a vendor mobile pickup nudge is queued.');
+}
+
+async function confirmVendorPayment(jobId?: string) {
+  if (!jobId) return;
+  const state = await readState(env.DB);
+  const job = state.jobs.find((item) => item.id === jobId);
+  if (!job) return;
+  const stamp = now();
+  const nextConsult = job.residentPaymentConfirmed
+    ? 'Resident and vendor confirmed direct payment'
+    : 'Vendor confirmed direct payment; resident confirmation still open';
+  await env.DB.prepare('UPDATE job_orders SET vendor_payment_confirmed = ?, resident_paid_vendor = CASE WHEN resident_payment_confirmed = 1 THEN 1 ELSE resident_paid_vendor END, amount_paid_cents = COALESCE(amount_paid_cents, ?), payment_date = COALESCE(payment_date, ?), payment_consult_status = ?, updated_at = ? WHERE id = ?')
+    .bind(1, cents(job.amount), stamp.slice(0, 10), nextConsult, stamp, jobId)
+    .run();
+  await logEvent('Vendor payment confirmed', jobId, 'Payment confirmation recorded from the vendor side.');
+}
+
+async function confirmResidentPayment(jobId?: string) {
+  if (!jobId) return;
+  const state = await readState(env.DB);
+  const job = state.jobs.find((item) => item.id === jobId);
+  if (!job) return;
+  const stamp = now();
+  const nextConsult = job.vendorPaymentConfirmed
+    ? 'Resident and vendor confirmed direct payment'
+    : 'Resident confirmed direct payment; vendor confirmation still open';
+  await env.DB.prepare('UPDATE job_orders SET resident_payment_confirmed = ?, resident_paid_vendor = CASE WHEN vendor_payment_confirmed = 1 THEN 1 ELSE resident_paid_vendor END, amount_paid_cents = COALESCE(amount_paid_cents, ?), payment_date = COALESCE(payment_date, ?), receipt_number = COALESCE(receipt_number, ?), payment_consult_status = ?, updated_at = ? WHERE id = ?')
+    .bind(1, cents(job.amount), stamp.slice(0, 10), 'Resident receipt optional', nextConsult, stamp, jobId)
+    .run();
+  await logEvent('Resident payment confirmed', jobId, 'Payment confirmation recorded from the resident side.');
+}
+
+async function submitPaymentInquiry(jobId?: string) {
+  if (!jobId) return;
+  const stamp = now();
+  await env.DB.prepare('UPDATE job_orders SET payment_inquiry_status = ?, payment_consult_status = ?, updated_at = ? WHERE id = ?')
+    .bind('Inquiry routed to info@flairo.org', 'Payment discrepancy inquiry routed to FLAIRO Admin', stamp, jobId)
+    .run();
+  await logEvent('Payment inquiry', jobId, 'Resident payment discrepancy inquiry routed to info@flairo.org.');
+}
+
+async function createManualJob(payload: Record<string, string>) {
+  const jobId = payload.jobId || `J-${Date.now().toString().slice(-5)}`;
+  const community = await env.DB.prepare('SELECT market FROM communities WHERE id = ? LIMIT 1')
+    .bind(payload.communityId)
+    .first<{ market: string }>();
+  const service = await env.DB.prepare('SELECT plus_price_cents FROM services WHERE name = ? LIMIT 1')
+    .bind(payload.service)
+    .first<{ plus_price_cents: number }>();
+  if (!payload.resident || !payload.communityId || !payload.unit || !payload.service || !community) return;
+
+  const stamp = now();
+  const amount = Number(payload.amount) || dollarsFromCents(Number(service?.plus_price_cents ?? 0));
+  const fee = amount * 0.1;
+  await env.DB.batch([
+    env.DB.prepare('INSERT OR IGNORE INTO resident_requests (id, resident_name, resident_email, resident_phone, community_id, market, unit, home_profile, service_name, preferred_window, board_status, visible_to_vendors, resident_info_released, requested_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(jobId, payload.resident, payload.email || 'resident-email-needed@flairo.org', payload.phone || 'Phone needed', payload.communityId, community.market, payload.unit, payload.homeProfile || 'Profile pending', payload.service, payload.preferredWindow || 'Resident follow-up needed', 'Open', 1, 0, stamp, stamp),
+    env.DB.prepare('INSERT OR IGNORE INTO job_orders (id, request_id, vendor_id, task_status, service_date, schedule_confirmed_at, vendor_confirmed_at, claimed_at, schedule_due_at, payment_consult_status, resident_paid_vendor, vendor_payment_confirmed, resident_payment_confirmed, amount_paid_cents, payment_date, receipt_number, payment_inquiry_status, service_amount_cents, flairo_fee_cents, points, invoice_trigger_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(jobId, jobId, null, 'Open', payload.serviceDate || stamp.slice(0, 10), null, null, null, null, 'Manual resident request created by FLAIRO Admin', 0, 0, 0, null, null, null, null, cents(amount), cents(fee), Math.round(amount * 1.5), 'Waiting', stamp, stamp),
+  ]);
+  await logEvent('Manual job order', jobId, 'FLAIRO Admin created a resident request and released it to the vendor board.');
 }
 
 async function triggerInvoice(jobId?: string) {
@@ -967,6 +1128,12 @@ function parseJsonArray(value: string) {
   } catch {
     return [];
   }
+}
+
+function sortVendorsForBoard(a: VendorSeed, b: VendorSeed) {
+  if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
+  if (a.rating !== b.rating) return b.rating - a.rating;
+  return a.name.localeCompare(b.name);
 }
 
 function labelTime(value: string) {

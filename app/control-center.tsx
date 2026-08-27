@@ -60,6 +60,7 @@ type Vendor = {
   feePercent: number;
   stage: string;
   rating: number;
+  preferred: boolean;
 };
 
 type Job = {
@@ -87,6 +88,12 @@ type Job = {
   residentInfoReleased: boolean;
   vendorConfirmed: boolean;
   paymentConsult: string;
+  vendorPaymentConfirmed: boolean;
+  residentPaymentConfirmed: boolean;
+  amountPaid: number | null;
+  paymentDate: string | null;
+  receiptNumber: string | null;
+  paymentInquiryStatus: string | null;
   invoiceStatus: InvoiceStatus;
 };
 
@@ -140,6 +147,19 @@ type Drilldown = {
   count: string;
   detail: string;
   rows: string[][];
+};
+
+type ManualJobDraft = {
+  resident: string;
+  phone: string;
+  email: string;
+  communityId: string;
+  unit: string;
+  homeProfile: string;
+  service: string;
+  preferredWindow: string;
+  serviceDate: string;
+  amount: string;
 };
 
 type VendorMonthRow = {
@@ -305,6 +325,7 @@ const initialVendors: Vendor[] = [
     feePercent: 10,
     stage: 'Board access active',
     rating: 4.8,
+    preferred: true,
   },
   {
     id: 'pink-palm',
@@ -322,6 +343,7 @@ const initialVendors: Vendor[] = [
     feePercent: 10,
     stage: 'Insurance renewal review',
     rating: 4.7,
+    preferred: false,
   },
   {
     id: 'porter',
@@ -339,6 +361,7 @@ const initialVendors: Vendor[] = [
     feePercent: 10,
     stage: 'License upload needed',
     rating: 4.5,
+    preferred: true,
   },
   {
     id: 'hex-key',
@@ -356,6 +379,7 @@ const initialVendors: Vendor[] = [
     feePercent: 10,
     stage: 'Board access active',
     rating: 4.6,
+    preferred: false,
   },
 ];
 
@@ -385,6 +409,12 @@ const initialJobs: Job[] = [
     residentInfoReleased: true,
     vendorConfirmed: false,
     paymentConsult: 'Vendor to confirm resident payment method',
+    vendorPaymentConfirmed: false,
+    residentPaymentConfirmed: false,
+    amountPaid: null,
+    paymentDate: null,
+    receiptNumber: null,
+    paymentInquiryStatus: null,
     invoiceStatus: 'Waiting',
   },
   {
@@ -412,6 +442,12 @@ const initialJobs: Job[] = [
     residentInfoReleased: false,
     vendorConfirmed: false,
     paymentConsult: 'Not started',
+    vendorPaymentConfirmed: false,
+    residentPaymentConfirmed: false,
+    amountPaid: null,
+    paymentDate: null,
+    receiptNumber: null,
+    paymentInquiryStatus: null,
     invoiceStatus: 'Waiting',
   },
   {
@@ -439,6 +475,12 @@ const initialJobs: Job[] = [
     residentInfoReleased: true,
     vendorConfirmed: true,
     paymentConsult: 'Resident and vendor confirmed direct payment',
+    vendorPaymentConfirmed: true,
+    residentPaymentConfirmed: true,
+    amountPaid: 27,
+    paymentDate: '2026-08-26',
+    receiptNumber: 'RCPT-7718',
+    paymentInquiryStatus: null,
     invoiceStatus: 'Ready',
   },
   {
@@ -466,6 +508,12 @@ const initialJobs: Job[] = [
     residentInfoReleased: false,
     vendorConfirmed: false,
     paymentConsult: 'Not started',
+    vendorPaymentConfirmed: false,
+    residentPaymentConfirmed: false,
+    amountPaid: null,
+    paymentDate: null,
+    receiptNumber: null,
+    paymentInquiryStatus: null,
     invoiceStatus: 'Waiting',
   },
 ];
@@ -606,6 +654,19 @@ export default function ControlCenter({
   const [syncStatus, setSyncStatus] = useState('Checking live app bridge');
   const [mobilePushStatus, setMobilePushStatus] = useState('Push to mobile app');
   const [clock, setClock] = useState(() => Date.now());
+  const [showManualJobForm, setShowManualJobForm] = useState(false);
+  const [manualJobDraft, setManualJobDraft] = useState<ManualJobDraft>({
+    amount: String(initialServices[0]?.plusPrice ?? ''),
+    communityId: initialCommunities[0]?.id ?? '',
+    email: '',
+    homeProfile: '',
+    phone: '',
+    preferredWindow: '',
+    resident: '',
+    service: initialServices[0]?.name ?? '',
+    serviceDate: '',
+    unit: '',
+  });
 
   const applyServerState = (state: Partial<FlairoState>) => {
     if (state.audit) setAudit(state.audit);
@@ -768,12 +829,14 @@ export default function ControlCenter({
     if (!job) return;
     const claimedAt = new Date().toISOString();
     const scheduleDueAt = addHours(claimedAt, 24);
-    const match = vendors.find(
-      (vendor) =>
-        vendor.boardAccess &&
-        vendor.markets.includes(job.market) &&
-        vendor.services.includes(job.service),
-    );
+    const match = vendors
+      .filter(
+        (vendor) =>
+          vendor.boardAccess &&
+          vendor.markets.includes(job.market) &&
+          vendor.services.includes(job.service),
+      )
+      .sort(sortVendorsForBoard)[0];
     if (!match) {
       addAudit('Claim blocked', `${jobId} has no compliant vendor in the matching market.`);
       return;
@@ -790,6 +853,12 @@ export default function ControlCenter({
               scheduleDueAt,
               visibleToVendors: false,
               residentInfoReleased: true,
+              vendorPaymentConfirmed: false,
+              residentPaymentConfirmed: false,
+              amountPaid: null,
+              paymentDate: null,
+              receiptNumber: null,
+              paymentInquiryStatus: null,
               paymentConsult: 'Resident contact released; vendor to schedule and consult on payment',
             }
           : item,
@@ -809,7 +878,7 @@ export default function ControlCenter({
               boardStatus: 'Scheduled',
               scheduledAt,
               vendorConfirmed: true,
-              paymentConsult: 'Resident and vendor confirmed direct payment plan',
+              paymentConsult: 'Scheduled; direct vendor payment still needs resident and vendor confirmation',
             }
           : job,
       ),
@@ -827,7 +896,12 @@ export default function ControlCenter({
               ...item,
               boardStatus: 'Completed',
               invoiceStatus: 'Ready',
-              paymentConsult: 'Service date passed; ready for FLAIRO fee invoice',
+              vendorPaymentConfirmed: true,
+              residentPaymentConfirmed: true,
+              amountPaid: item.amount,
+              paymentDate: todayInputDate(),
+              receiptNumber: item.receiptNumber ?? 'Admin override',
+              paymentConsult: 'Admin confirmed job complete and paid; resident survey queued',
             }
           : item,
       ),
@@ -847,7 +921,7 @@ export default function ControlCenter({
         ...current,
       ]);
     }
-    addAudit('Job completed', `${jobId} completed and moved into invoice-ready status.`);
+    addAudit('Job completed', `${jobId} completed, payment confirmed, and resident survey queued.`);
     void persistAction('complete_job', { jobId });
   };
 
@@ -877,7 +951,190 @@ export default function ControlCenter({
       ),
     );
     addAudit('Bluevine invoice trigger', `${invoiceId} created for ${job.id}.`);
+    setActiveModule('invoices');
     void persistAction('trigger_invoice', { jobId });
+  };
+
+  const reactivateJob = (jobId: string) => {
+    const job = jobs.find((item) => item.id === jobId);
+    if (!job?.vendorId) {
+      addAudit('Reactivation blocked', `${jobId} needs a claimed vendor before it can be released.`);
+      return;
+    }
+    const releasedVendor = vendorName(job.vendorId, vendors);
+
+    setJobs((current) =>
+      current.map((item) =>
+        item.id === jobId
+          ? {
+              ...item,
+              boardStatus: 'Open',
+              claimedAt: null,
+              scheduleDueAt: null,
+              scheduledAt: null,
+              vendorId: null,
+              visibleToVendors: true,
+              residentInfoReleased: false,
+              vendorConfirmed: false,
+              vendorPaymentConfirmed: false,
+              residentPaymentConfirmed: false,
+              amountPaid: null,
+              paymentDate: null,
+              receiptNumber: null,
+              paymentInquiryStatus: null,
+              paymentConsult: 'Re-activated; matching vendors nudged in the mobile app',
+              invoiceStatus: 'Waiting',
+            }
+          : item,
+      ),
+    );
+    addAudit('Request re-activated', `${jobId} released from ${releasedVendor}; matching vendors should receive a mobile pickup nudge.`);
+    setActiveModule('board');
+    void persistAction('reactivate_job', { jobId });
+  };
+
+  const confirmVendorPayment = (jobId: string) => {
+    const job = jobs.find((item) => item.id === jobId);
+    if (!job) return;
+    setJobs((current) =>
+      current.map((item) =>
+        item.id === jobId
+          ? {
+              ...item,
+              vendorPaymentConfirmed: true,
+              amountPaid: item.amountPaid ?? item.amount,
+              paymentDate: item.paymentDate ?? todayInputDate(),
+              paymentConsult: item.residentPaymentConfirmed
+                ? 'Resident and vendor confirmed direct payment'
+                : 'Vendor confirmed direct payment; resident confirmation still open',
+            }
+          : item,
+      ),
+    );
+    addAudit('Vendor payment confirmed', `${jobId} payment was confirmed from the vendor side.`);
+    void persistAction('confirm_vendor_payment', { jobId });
+  };
+
+  const confirmResidentPayment = (jobId: string) => {
+    const job = jobs.find((item) => item.id === jobId);
+    if (!job) return;
+    setJobs((current) =>
+      current.map((item) =>
+        item.id === jobId
+          ? {
+              ...item,
+              residentPaymentConfirmed: true,
+              amountPaid: item.amountPaid ?? item.amount,
+              paymentDate: item.paymentDate ?? todayInputDate(),
+              receiptNumber: item.receiptNumber ?? 'Resident receipt optional',
+              paymentConsult: item.vendorPaymentConfirmed
+                ? 'Resident and vendor confirmed direct payment'
+                : 'Resident confirmed direct payment; vendor confirmation still open',
+            }
+          : item,
+      ),
+    );
+    addAudit('Resident payment confirmed', `${jobId} payment was confirmed from the resident side.`);
+    void persistAction('confirm_resident_payment', { jobId });
+  };
+
+  const submitPaymentInquiry = (jobId: string) => {
+    setJobs((current) =>
+      current.map((job) =>
+        job.id === jobId
+          ? {
+              ...job,
+              paymentInquiryStatus: 'Inquiry routed to info@flairo.org',
+              paymentConsult: 'Payment discrepancy inquiry routed to FLAIRO Admin',
+            }
+          : job,
+      ),
+    );
+    addAudit('Payment inquiry', `${jobId} discrepancy inquiry routed to info@flairo.org.`);
+    void persistAction('submit_payment_inquiry', { jobId });
+  };
+
+  const updateManualJobDraft = (field: keyof ManualJobDraft, value: string) => {
+    setManualJobDraft((current) => ({ ...current, [field]: value }));
+  };
+
+  const createManualJobOrder = () => {
+    const community = communities.find((item) => item.id === manualJobDraft.communityId) ?? communities[0];
+    const service = services.find((item) => item.name === manualJobDraft.service) ?? services[0];
+    if (!community || !service || !manualJobDraft.resident.trim() || !manualJobDraft.unit.trim()) {
+      addAudit('Manual job blocked', 'Resident, community, unit, and service are required before creating a job order.');
+      return;
+    }
+
+    const nextNumber = jobs.reduce((max, job) => {
+      const numericId = Number(job.id.replace(/\D/g, ''));
+      return Number.isNaN(numericId) ? max : Math.max(max, numericId);
+    }, 1051) + 1;
+    const amount = Number(manualJobDraft.amount) || service.plusPrice;
+    const jobId = `J-${nextNumber}`;
+    const newJob: Job = {
+      amount,
+      amountPaid: null,
+      boardStatus: 'Open',
+      claimedAt: null,
+      communityId: community.id,
+      email: manualJobDraft.email.trim() || 'resident-email-needed@flairo.org',
+      flairoFee: amount * 0.1,
+      homeProfile: manualJobDraft.homeProfile.trim() || 'Profile pending',
+      id: jobId,
+      invoiceStatus: 'Waiting',
+      market: community.market,
+      paymentConsult: 'Manual resident request created by FLAIRO Admin',
+      paymentDate: null,
+      paymentInquiryStatus: null,
+      phone: manualJobDraft.phone.trim() || 'Phone needed',
+      points: Math.round(amount * 1.5),
+      preferredWindow: manualJobDraft.preferredWindow.trim() || 'Resident follow-up needed',
+      receiptNumber: null,
+      requestedAt: new Date().toISOString(),
+      resident: manualJobDraft.resident.trim(),
+      residentInfoReleased: false,
+      residentPaymentConfirmed: false,
+      scheduleDueAt: null,
+      scheduledAt: null,
+      service: service.name,
+      serviceDate: manualJobDraft.serviceDate || todayInputDate(),
+      unit: manualJobDraft.unit.trim(),
+      vendorConfirmed: false,
+      vendorId: null,
+      vendorPaymentConfirmed: false,
+      visibleToVendors: true,
+    };
+
+    setJobs((current) => [newJob, ...current]);
+    setManualJobDraft({
+      amount: String(service.plusPrice),
+      communityId: community.id,
+      email: '',
+      homeProfile: '',
+      phone: '',
+      preferredWindow: '',
+      resident: '',
+      service: service.name,
+      serviceDate: '',
+      unit: '',
+    });
+    setShowManualJobForm(false);
+    setActiveModule('board');
+    addAudit('Manual job order', `${jobId} created by FLAIRO Admin and released to the vendor board.`);
+    void persistAction('create_manual_job', {
+      amount: String(amount),
+      communityId: community.id,
+      email: newJob.email,
+      homeProfile: newJob.homeProfile,
+      jobId,
+      phone: newJob.phone,
+      preferredWindow: newJob.preferredWindow,
+      resident: newJob.resident,
+      service: service.name,
+      serviceDate: newJob.serviceDate,
+      unit: newJob.unit,
+    });
   };
 
   const processVendorMonth = (vendorId: string, monthKey: string) => {
@@ -1052,10 +1309,20 @@ export default function ControlCenter({
           <OpenTasksModule
             communities={communities}
             completeJob={completeJob}
+            confirmResidentPayment={confirmResidentPayment}
             confirmSchedule={confirmSchedule}
+            confirmVendorPayment={confirmVendorPayment}
+            createManualJobOrder={createManualJobOrder}
             clock={clock}
             jobs={jobs}
+            manualJobDraft={manualJobDraft}
+            reactivateJob={reactivateJob}
+            services={services}
+            setShowManualJobForm={setShowManualJobForm}
+            showManualJobForm={showManualJobForm}
+            submitPaymentInquiry={submitPaymentInquiry}
             triggerInvoice={triggerInvoice}
+            updateManualJobDraft={updateManualJobDraft}
             vendors={vendors}
           />
         )}
@@ -1421,9 +1688,9 @@ function VendorsModule({
             detail: 'From completed FLAIRO jobs',
           },
           {
-            label: 'Default FLAIRO fee',
-            value: '10%',
-            detail: 'Vendor revenue obligation',
+            label: 'Vendor-specific fees',
+            value: 'Per vendor',
+            detail: 'Agreed FLAIRO share lives on each profile',
           },
         ]}
       />
@@ -1547,7 +1814,9 @@ function JobBoardModule({
               <JobTimer timer={timer} />
               <div className="matched-vendors">
                 <p className="eyebrow">Eligible vendors</p>
-                {matches.length ? matches.map((vendor) => <span key={vendor.id}>{vendor.name}</span>) : <span>No compliant match</span>}
+                {matches.length ? matches
+                  .sort(sortVendorsForBoard)
+                  .map((vendor) => <span className={vendorVisibilityClass(vendor)} key={vendor.id}>{vendor.name}</span>) : <span>No compliant match</span>}
               </div>
               <button type="button" onClick={() => claimJob(job.id)}>
                 Claim with matched vendor
@@ -1563,40 +1832,183 @@ function JobBoardModule({
 function OpenTasksModule({
   clock,
   communities,
+  confirmResidentPayment,
   completeJob,
   confirmSchedule,
+  confirmVendorPayment,
+  createManualJobOrder,
   jobs,
+  manualJobDraft,
+  reactivateJob,
+  services,
+  setShowManualJobForm,
+  showManualJobForm,
+  submitPaymentInquiry,
   triggerInvoice,
+  updateManualJobDraft,
   vendors,
 }: {
   clock: number;
   communities: Community[];
+  confirmResidentPayment: (jobId: string) => void;
   completeJob: (jobId: string) => void;
   confirmSchedule: (jobId: string) => void;
+  confirmVendorPayment: (jobId: string) => void;
+  createManualJobOrder: () => void;
   jobs: Job[];
+  manualJobDraft: ManualJobDraft;
+  reactivateJob: (jobId: string) => void;
+  services: Service[];
+  setShowManualJobForm: (show: boolean) => void;
+  showManualJobForm: boolean;
+  submitPaymentInquiry: (jobId: string) => void;
   triggerInvoice: (jobId: string) => void;
+  updateManualJobDraft: (field: keyof ManualJobDraft, value: string) => void;
   vendors: Vendor[];
 }) {
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All claimed work');
+  const claimedJobs = jobs.filter((job) => job.vendorId && !job.visibleToVendors && job.boardStatus !== 'Open');
+  const filteredJobs = claimedJobs.filter((job) => {
+    const vendor = job.vendorId ? vendors.find((item) => item.id === job.vendorId) : undefined;
+    const payment = paymentSummary(job);
+    const haystack = [
+      job.id,
+      job.resident,
+      job.phone,
+      job.email,
+      job.market,
+      job.unit,
+      job.homeProfile,
+      job.service,
+      job.preferredWindow,
+      job.boardStatus,
+      job.invoiceStatus,
+      payment,
+      communityName(job.communityId, communities),
+      vendor?.name,
+      vendor?.contact,
+      vendor?.email,
+      vendor?.phone,
+    ].filter(Boolean).join(' ').toLowerCase();
+    const matchesSearch = !search.trim() || haystack.includes(search.trim().toLowerCase());
+    const matchesStatus = statusFilter === 'All claimed work' || job.boardStatus === statusFilter || job.invoiceStatus === statusFilter || payment === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
   return (
     <section className="table-panel">
       <div className="section-heading">
         <div>
           <p className="eyebrow">Open task page</p>
-          <h2>FLAIRO control copy for every resident request</h2>
+          <h2>Claimed work requiring FLAIRO control</h2>
         </div>
-        <button type="button">Create job order</button>
+        <button type="button" onClick={() => setShowManualJobForm(true)}>Create job order</button>
+      </div>
+
+      {showManualJobForm && (
+        <div className="manual-job-form">
+          <div>
+            <p className="eyebrow gold">Admin manual intake</p>
+            <h3>Create resident request for the vendor board</h3>
+          </div>
+          <label>
+            Resident
+            <input value={manualJobDraft.resident} onChange={(event) => updateManualJobDraft('resident', event.target.value)} />
+          </label>
+          <label>
+            Phone
+            <input value={manualJobDraft.phone} onChange={(event) => updateManualJobDraft('phone', event.target.value)} />
+          </label>
+          <label>
+            Email
+            <input type="email" value={manualJobDraft.email} onChange={(event) => updateManualJobDraft('email', event.target.value)} />
+          </label>
+          <label>
+            Community
+            <select value={manualJobDraft.communityId} onChange={(event) => updateManualJobDraft('communityId', event.target.value)}>
+              {communities.map((community) => (
+                <option key={community.id} value={community.id}>{community.name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Unit
+            <input value={manualJobDraft.unit} onChange={(event) => updateManualJobDraft('unit', event.target.value)} />
+          </label>
+          <label>
+            Home profile
+            <input value={manualJobDraft.homeProfile} onChange={(event) => updateManualJobDraft('homeProfile', event.target.value)} />
+          </label>
+          <label>
+            Service
+            <select value={manualJobDraft.service} onChange={(event) => {
+              const nextService = services.find((service) => service.name === event.target.value);
+              updateManualJobDraft('service', event.target.value);
+              updateManualJobDraft('amount', String(nextService?.plusPrice ?? manualJobDraft.amount));
+            }}>
+              {services.map((service) => (
+                <option key={service.id} value={service.name}>{service.name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Preferred window
+            <input value={manualJobDraft.preferredWindow} onChange={(event) => updateManualJobDraft('preferredWindow', event.target.value)} />
+          </label>
+          <label>
+            Service date
+            <input type="date" value={manualJobDraft.serviceDate} onChange={(event) => updateManualJobDraft('serviceDate', event.target.value)} />
+          </label>
+          <label>
+            Resident service total
+            <input min="0" step="0.01" type="number" value={manualJobDraft.amount} onChange={(event) => updateManualJobDraft('amount', event.target.value)} />
+          </label>
+          <div className="manual-job-actions">
+            <button type="button" onClick={createManualJobOrder}>Create request</button>
+            <button className="secondary-action" type="button" onClick={() => setShowManualJobForm(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      <div className="task-search-bar">
+        <label>
+          Search open tasks
+          <input
+            placeholder="Resident, vendor, job, service, community, payment, or invoice"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
+        <label>
+          Filter
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option>All claimed work</option>
+            <option>Claimed</option>
+            <option>Scheduled</option>
+            <option>Completed</option>
+            <option>Waiting</option>
+            <option>Ready</option>
+            <option>Draft queued</option>
+            <option>Paid by both sides</option>
+            <option>Open payment confirmation</option>
+          </select>
+        </label>
+        <div className="task-search-count">
+          <span>{filteredJobs.length}</span>
+          <strong>{filteredJobs.length === 1 ? 'claimed task visible' : 'claimed tasks visible'}</strong>
+        </div>
       </div>
 
       <div className="task-stack">
-        {jobs.map((job) => {
+        {filteredJobs.length ? filteredJobs.map((job) => {
           const timer = getJobTimer(job, clock);
+          const vendor = job.vendorId ? vendors.find((item) => item.id === job.vendorId) : undefined;
           return (
           <article className="task-card" key={job.id}>
             <div className="task-main">
               <div>
-                <span className={job.visibleToVendors ? 'status good' : 'status hold'}>
-                  {job.visibleToVendors ? 'On vendor board' : 'Board hidden'}
-                </span>
+                <span className="status hold">Board hidden</span>
                 <h3>{job.id} / {job.service}</h3>
                 <p>{communityName(job.communityId, communities)} / Unit {job.unit} / {job.preferredWindow}</p>
               </div>
@@ -1608,28 +2020,43 @@ function OpenTasksModule({
 
             <div className="task-grid">
               <InfoTile label={timer.label} value={`${timer.value} / ${timer.detail}`} />
-              <InfoTile label="Vendor" value={job.vendorId ? vendorName(job.vendorId, vendors) : 'Unclaimed'} />
+              <VendorTile vendor={vendor} />
               <InfoTile label="Resident contact" value={job.residentInfoReleased ? `${job.resident} / ${job.phone}` : 'Hidden until claim'} />
-              <InfoTile label="Vendor confirmation" value={job.vendorConfirmed ? 'Confirmed' : 'Needed'} />
-              <InfoTile label="Payment consult" value={job.paymentConsult} />
+              <InfoTile label="Scheduled date/time" value={job.scheduledAt ? labelDateTimeShort(job.scheduledAt) : `Needed by vendor / ${job.preferredWindow}`} />
               <InfoTile label="Task status" value={job.boardStatus} />
+              <InfoTile label="Vendor confirmation" value={job.vendorConfirmed ? 'Confirmed' : 'Needed'} />
+              <InfoTile label="Payment" value={`${paymentSummary(job)} / ${paymentDetail(job)}`} />
               <InfoTile label="Invoice" value={job.invoiceStatus} />
             </div>
 
             <div className="action-row">
               <button type="button" onClick={() => confirmSchedule(job.id)}>
-                Confirm booking
+                Admin Confirm Booking
               </button>
               <button type="button" onClick={() => completeJob(job.id)}>
-                Mark service passed
+                Job Complete
               </button>
               <button type="button" onClick={() => triggerInvoice(job.id)}>
                 Trigger invoice
               </button>
+              <button className="danger-action" type="button" onClick={() => reactivateJob(job.id)}>
+                Re-activate Request
+              </button>
+              <button className="secondary-action" type="button" onClick={() => confirmVendorPayment(job.id)}>
+                Vendor paid
+              </button>
+              <button className="secondary-action" type="button" onClick={() => confirmResidentPayment(job.id)}>
+                Resident paid
+              </button>
+              <button className="secondary-action" type="button" onClick={() => submitPaymentInquiry(job.id)}>
+                Payment inquiry
+              </button>
             </div>
           </article>
           );
-        })}
+        }) : (
+          <div className="empty-note task-empty">No claimed jobs match this view. Unclaimed and re-activated requests live on the Job Board.</div>
+        )}
       </div>
     </section>
   );
@@ -2109,6 +2536,18 @@ function JobTimer({ timer }: { timer: ReturnType<typeof getJobTimer> }) {
   );
 }
 
+function VendorTile({ vendor }: { vendor?: Vendor }) {
+  return (
+    <div className="info-tile vendor-info">
+      <span>Vendor</span>
+      <strong className={`vendor-name ${vendor ? vendorVisibilityClass(vendor) : ''}`}>
+        {vendor?.name ?? 'Vendor not set'}
+      </strong>
+      {vendor && <em>{vendor.preferred ? 'Preferred first-right vendor' : vendor.rating >= 4.7 ? `Highly rated / ${vendor.rating.toFixed(1)}` : `Rating ${vendor.rating.toFixed(1)}`}</em>}
+    </div>
+  );
+}
+
 function InfoTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="info-tile">
@@ -2135,6 +2574,52 @@ function addHours(isoDate: string, hours: number) {
   const timestamp = Date.parse(isoDate);
   const base = Number.isNaN(timestamp) ? Date.now() : timestamp;
   return new Date(base + hours * HOUR_MS).toISOString();
+}
+
+function todayInputDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function labelDateTimeShort(value: string) {
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return value;
+  return new Date(timestamp).toLocaleString('en-US', {
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    month: 'short',
+  });
+}
+
+function sortVendorsForBoard(a: Vendor, b: Vendor) {
+  if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
+  if (a.rating !== b.rating) return b.rating - a.rating;
+  return a.name.localeCompare(b.name);
+}
+
+function vendorVisibilityClass(vendor: Vendor) {
+  if (vendor.preferred) return 'preferred-vendor';
+  if (vendor.rating >= 4.7) return 'high-rated-vendor';
+  return '';
+}
+
+function paymentSummary(job: Pick<Job, 'vendorPaymentConfirmed' | 'residentPaymentConfirmed'>) {
+  if (job.vendorPaymentConfirmed && job.residentPaymentConfirmed) return 'Paid by both sides';
+  if (job.vendorPaymentConfirmed) return 'Vendor confirmed';
+  if (job.residentPaymentConfirmed) return 'Resident confirmed';
+  return 'Open payment confirmation';
+}
+
+function paymentDetail(job: Job) {
+  if (job.paymentInquiryStatus) return job.paymentInquiryStatus;
+
+  const details = [
+    job.amountPaid ? dollars(job.amountPaid) : null,
+    job.paymentDate ? labelDateTimeShort(job.paymentDate) : null,
+    job.receiptNumber ? `Receipt ${job.receiptNumber}` : null,
+  ].filter(Boolean);
+
+  return details.length ? details.join(' / ') : 'Amount, date, and receipt pending';
 }
 
 function getJobTimer(job: Job, clock: number) {

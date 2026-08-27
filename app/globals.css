@@ -629,6 +629,32 @@ button:hover {
   background: #ffa2d4;
 }
 
+input,
+select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(8, 8, 10, 0.76);
+  color: var(--ivory);
+  font: inherit;
+  min-height: 42px;
+  padding: 10px 11px;
+}
+
+label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+input::placeholder {
+  color: #76706f;
+}
+
 .file-upload {
   display: inline-flex;
   align-items: center;
@@ -687,6 +713,68 @@ button:hover {
   align-items: center;
   justify-content: space-between;
   gap: 20px;
+}
+
+.manual-job-form,
+.task-search-bar {
+  display: grid;
+  align-items: end;
+  border: 1px solid rgba(212, 175, 55, 0.22);
+  border-radius: 8px;
+  background: rgba(212, 175, 55, 0.055);
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 14px;
+}
+
+.manual-job-form {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.manual-job-form > div:first-child {
+  grid-column: 1 / -1;
+}
+
+.manual-job-form h3 {
+  margin: 4px 0 0;
+  color: #ffffff;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 21px;
+  font-weight: 500;
+}
+
+.manual-job-actions {
+  display: flex;
+  gap: 9px;
+}
+
+.task-search-bar {
+  grid-template-columns: minmax(280px, 1fr) minmax(210px, 0.38fr) minmax(160px, auto);
+}
+
+.task-search-count {
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 10px 12px;
+}
+
+.task-search-count span,
+.task-search-count strong {
+  display: block;
+}
+
+.task-search-count span {
+  color: var(--dusty-pink);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 25px;
+  line-height: 1;
+}
+
+.task-search-count strong {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .integration-strip {
@@ -973,6 +1061,66 @@ button:hover {
   background: var(--ivory);
 }
 
+.secondary-action {
+  border: 1px solid var(--line-soft);
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--ivory) !important;
+}
+
+.secondary-action:hover {
+  background: rgba(255, 255, 255, 0.14) !important;
+}
+
+.danger-action {
+  border: 1px solid rgba(255, 143, 155, 0.34);
+  background: rgba(255, 143, 155, 0.18) !important;
+  color: #ffdbe0 !important;
+}
+
+.danger-action:hover {
+  background: rgba(255, 143, 155, 0.26) !important;
+}
+
+.vendor-info em {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.25;
+}
+
+.vendor-name.preferred-vendor,
+.matched-vendors span.preferred-vendor,
+.vendor-name.high-rated-vendor,
+.matched-vendors span.high-rated-vendor {
+  animation: glitter-shift 3.2s linear infinite;
+  background-clip: text;
+  background-size: 210% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.vendor-name.preferred-vendor,
+.matched-vendors span.preferred-vendor {
+  background-image: linear-gradient(92deg, #fff7bd 0%, #d4af37 32%, #fff2a8 50%, #a8751c 72%, #fff8cb 100%);
+}
+
+.vendor-name.high-rated-vendor,
+.matched-vendors span.high-rated-vendor {
+  background-image: linear-gradient(92deg, #ffe0f1 0%, #f786c7 35%, #ffffff 50%, #e25ea6 72%, #ffd4ec 100%);
+}
+
+@keyframes glitter-shift {
+  from {
+    background-position: 0% 50%;
+  }
+
+  to {
+    background-position: 210% 50%;
+  }
+}
+
 .job-grid,
 .statement-grid {
   display: grid;
@@ -1150,6 +1298,8 @@ button:hover {
   .task-grid,
   .statement-numbers,
   .vendor-month-summary,
+  .manual-job-form,
+  .task-search-bar,
   .vendor-month-row,
   .vendor-month-panel.invoice-mode .vendor-month-row,
   .drilldown-row {
