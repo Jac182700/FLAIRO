@@ -114,6 +114,21 @@ type AuditEntry = {
   time: string;
 };
 
+type Metric = {
+  id?: string;
+  label: string;
+  value: string;
+  detail: string;
+};
+
+type Drilldown = {
+  id: string;
+  label: string;
+  count: string;
+  detail: string;
+  rows: string[][];
+};
+
 type FlairoState = {
   audit: AuditEntry[];
   communities: Community[];
@@ -124,16 +139,16 @@ type FlairoState = {
   vendors: Vendor[];
 };
 
-const navSections: Array<{ id: ModuleId; label: string; tag: string }> = [
-  { id: 'command', label: 'Command', tag: 'Today' },
-  { id: 'mobile', label: 'Mobile Controls', tag: 'App' },
-  { id: 'vendors', label: 'Vendors', tag: 'CRM' },
-  { id: 'board', label: 'Job Board', tag: 'Pool' },
-  { id: 'tasks', label: 'Open Tasks', tag: 'Orders' },
-  { id: 'rewards', label: 'Rewards', tag: 'Points' },
-  { id: 'invoices', label: 'Invoices', tag: 'Bluevine' },
-  { id: 'reports', label: 'Community Reports', tag: 'Finance' },
-  { id: 'settings', label: 'Settings', tag: 'Rules' },
+const navSections: Array<{ id: ModuleId; label: string }> = [
+  { id: 'command', label: 'Command' },
+  { id: 'mobile', label: 'Mobile Controls' },
+  { id: 'vendors', label: 'Vendors' },
+  { id: 'board', label: 'Job Board' },
+  { id: 'tasks', label: 'Open Tasks' },
+  { id: 'rewards', label: 'Rewards' },
+  { id: 'invoices', label: 'Invoices' },
+  { id: 'reports', label: 'Community Reports' },
+  { id: 'settings', label: 'Settings' },
 ];
 
 const initialServices: Service[] = [
@@ -584,12 +599,12 @@ export default function ControlCenter({
       .reduce((sum, invoice) => sum + invoice.amount, 0);
 
     return [
-      { label: 'Vendor-visible jobs', value: String(openBoard), detail: 'Open resident requests' },
-      { label: 'FLAIRO controlled tasks', value: String(controlledTasks), detail: 'Claimed, scheduled, or complete' },
-      { label: 'Compliant vendors', value: `${compliant}/${vendors.length}`, detail: 'Board access eligible' },
-      { label: 'Rewards liability', value: dollars(rewardLiability), detail: 'Pending and available points' },
-      { label: 'Invoice trigger queue', value: dollars(invoiceQueue), detail: 'Bluevine draft requests' },
-      { label: 'PLUS memberships', value: '182', detail: 'Across active communities' },
+      { id: 'metric-board-jobs', label: 'Vendor-visible jobs', value: String(openBoard), detail: 'Open resident requests' },
+      { id: 'metric-controlled-tasks', label: 'FLAIRO controlled tasks', value: String(controlledTasks), detail: 'Claimed, scheduled, or complete' },
+      { id: 'metric-compliant-vendors', label: 'Compliant vendors', value: `${compliant}/${vendors.length}`, detail: 'Board access eligible' },
+      { id: 'metric-reward-liability', label: 'Rewards liability', value: dollars(rewardLiability), detail: 'Pending and available points' },
+      { id: 'metric-invoice-queue', label: 'Invoice trigger queue', value: dollars(invoiceQueue), detail: 'Bluevine draft requests' },
+      { id: 'metric-plus-memberships', label: 'PLUS memberships', value: '182', detail: 'Across active communities' },
     ];
   }, [invoices, jobs, rewards, vendors]);
 
@@ -796,7 +811,6 @@ export default function ControlCenter({
               type="button"
             >
               <span>{section.label}</span>
-              <b>{section.tag}</b>
             </button>
           ))}
         </nav>
@@ -831,7 +845,10 @@ export default function ControlCenter({
           <CommandModule
             audit={audit}
             communities={communities}
+            invoices={invoices}
+            jobs={jobs}
             metrics={metrics}
+            rewards={rewards}
             vendors={vendors}
           />
         )}
@@ -903,41 +920,212 @@ export default function ControlCenter({
 function CommandModule({
   audit,
   communities,
+  invoices,
+  jobs,
   metrics,
+  rewards,
   vendors,
 }: {
   audit: AuditEntry[];
   communities: Community[];
-  metrics: Array<{ label: string; value: string; detail: string }>;
+  invoices: InvoiceTrigger[];
+  jobs: Job[];
+  metrics: Metric[];
+  rewards: RewardEntry[];
   vendors: Vendor[];
 }) {
+  const [activeDrilldown, setActiveDrilldown] = useState('priority-compliance');
   const reviewVendors = vendors.filter((vendor) => vendor.status !== 'Compliant');
+  const boardJobs = jobs.filter((job) => job.visibleToVendors);
+  const controlledJobs = jobs.filter((job) => job.boardStatus !== 'Open');
   const readyStatements = communities.filter((community) => community.statementStatus === 'Ready');
+  const readyInvoiceJobs = jobs.filter((job) => job.invoiceStatus === 'Ready' || job.invoiceStatus === 'Draft queued');
+  const invoiceQueue = invoices.filter((invoice) => invoice.status === 'Ready' || invoice.status === 'Draft queued');
+  const activeRewardEntries = rewards.filter((entry) => entry.status === 'Available' || entry.status === 'Pending');
+
+  const priorityDrilldowns: Drilldown[] = [
+    {
+      id: 'priority-compliance',
+      label: 'Compliance review',
+      count: String(reviewVendors.length),
+      detail: 'Vendors that need a document upload, review, or board-access decision today.',
+      rows: reviewVendors.map((vendor) => [
+        vendor.name,
+        vendor.stage,
+        `Insurance: ${vendor.insurance}`,
+        `License: ${vendor.license}`,
+      ]),
+    },
+    {
+      id: 'priority-board',
+      label: 'Vendor job board',
+      count: String(boardJobs.length),
+      detail: 'Resident requests still visible for compliant vendors to claim by market and service.',
+      rows: boardJobs.map((job) => [
+        job.id,
+        job.service,
+        `${communityName(job.communityId, communities)} / ${job.market}`,
+        `${job.preferredWindow} / ${dollars(job.amount)}`,
+      ]),
+    },
+    {
+      id: 'priority-statements',
+      label: 'Statements ready',
+      count: String(readyStatements.length),
+      detail: 'Community income reports ready to review, export, or mark issued.',
+      rows: readyStatements.map((community) => [
+        community.name,
+        community.manager,
+        `${community.plusMembers} PLUS members`,
+        dollars(community.netIncome),
+      ]),
+    },
+    {
+      id: 'priority-invoices',
+      label: 'Bluevine triggers',
+      count: String(readyInvoiceJobs.length + invoiceQueue.length),
+      detail: 'Completed jobs and invoice records that should be pushed into the Bluevine draft flow.',
+      rows: [
+        ...readyInvoiceJobs.map((job) => [
+          job.id,
+          job.vendorId ? vendorName(job.vendorId, vendors) : 'Vendor needed',
+          job.invoiceStatus,
+          dollars(job.flairoFee),
+        ]),
+        ...invoiceQueue.map((invoice) => [
+          invoice.id,
+          vendorName(invoice.vendorId, vendors),
+          invoice.status,
+          dollars(invoice.amount),
+        ]),
+      ],
+    },
+  ];
+
+  const metricDrilldowns: Drilldown[] = [
+    {
+      id: 'metric-board-jobs',
+      label: 'Vendor-visible jobs',
+      count: String(boardJobs.length),
+      detail: 'The open requests still available to the vendor pool.',
+      rows: boardJobs.map((job) => [
+        job.id,
+        job.service,
+        communityName(job.communityId, communities),
+        `${job.market} / ${job.preferredWindow}`,
+      ]),
+    },
+    {
+      id: 'metric-controlled-tasks',
+      label: 'FLAIRO controlled tasks',
+      count: String(controlledJobs.length),
+      detail: 'Claimed, scheduled, and completed work that employees can still manage.',
+      rows: controlledJobs.map((job) => [
+        job.id,
+        job.boardStatus,
+        job.vendorId ? vendorName(job.vendorId, vendors) : 'Unclaimed',
+        job.invoiceStatus,
+      ]),
+    },
+    {
+      id: 'metric-compliant-vendors',
+      label: 'Compliant vendors',
+      count: `${vendors.filter((vendor) => vendor.boardAccess).length}/${vendors.length}`,
+      detail: 'Vendors allowed to claim work after compliance approval.',
+      rows: vendors.map((vendor) => [
+        vendor.name,
+        vendor.status,
+        vendor.boardAccess ? 'Board access on' : 'Board access off',
+        vendor.markets.join(', '),
+      ]),
+    },
+    {
+      id: 'metric-reward-liability',
+      label: 'Rewards liability',
+      count: dollars(activeRewardEntries.reduce((sum, entry) => sum + entry.value, 0)),
+      detail: 'Pending and available resident points that still carry value.',
+      rows: activeRewardEntries.map((entry) => [
+        entry.resident,
+        entry.status,
+        `${entry.points.toLocaleString()} pts`,
+        dollars(entry.value),
+      ]),
+    },
+    {
+      id: 'metric-invoice-queue',
+      label: 'Invoice trigger queue',
+      count: dollars(invoiceQueue.reduce((sum, invoice) => sum + invoice.amount, 0)),
+      detail: 'Invoice drafts waiting for or already queued to the Bluevine process.',
+      rows: invoiceQueue.map((invoice) => [
+        invoice.id,
+        invoice.jobId,
+        vendorName(invoice.vendorId, vendors),
+        `${invoice.status} / ${dollars(invoice.amount)}`,
+      ]),
+    },
+    {
+      id: 'metric-plus-memberships',
+      label: 'PLUS memberships',
+      count: String(communities.reduce((sum, community) => sum + community.plusMembers, 0)),
+      detail: 'Paid recurring FLAIRO PLUS memberships by community.',
+      rows: communities.map((community) => [
+        community.name,
+        `${community.plusMembers} PLUS members`,
+        `${community.occupied} occupied homes`,
+        `${percent(community.servicePenetration)} penetration`,
+      ]),
+    },
+  ];
+
+  const drilldowns = [...priorityDrilldowns, ...metricDrilldowns];
+  const selectedDrilldown = drilldowns.find((item) => item.id === activeDrilldown) ?? priorityDrilldowns[0];
 
   return (
     <>
       <section className="hero-grid" id="command">
-        <div className="command-panel">
-          <div className="panel-copy">
-            <p className="eyebrow gold">Today at a glance</p>
-            <h2>Control FLAIRO services, vendor compliance, resident rewards, and community income from one employee workspace.</h2>
-            <p>
-              The resident mobile app stays resident-facing. This site manages what appears there, which vendors can claim work, and when FLAIRO invoices earned fees.
-            </p>
+        <div className="command-panel attention-panel">
+          <div className="section-heading tight">
+            <div>
+              <p className="eyebrow gold">Needs attention today</p>
+              <h2>{selectedDrilldown.label}</h2>
+            </div>
+            <strong className="drilldown-count">{selectedDrilldown.count}</strong>
           </div>
-          <img src="/flairo-assets/flairo-gold-full-logo-web.jpg" alt="FLAIRO logo" className="hero-logo" />
+          <p className="drilldown-summary">{selectedDrilldown.detail}</p>
+          <div className="drilldown-list">
+            {selectedDrilldown.rows.length ? selectedDrilldown.rows.slice(0, 6).map((row) => (
+              <div className="drilldown-row" key={row.join('-')}>
+                {row.map((cell) => (
+                  <span key={cell}>{cell}</span>
+                ))}
+              </div>
+            )) : (
+              <div className="drilldown-empty">Nothing needs attention in this queue.</div>
+            )}
+          </div>
         </div>
 
         <div className="queue-panel">
           <p className="eyebrow">Priority queues</p>
-          <QueueRow count={reviewVendors.length} detail="Vendor insurance, license, or onboarding review needed" label="Compliance review" tone="review" />
-          <QueueRow count={18} detail="Open work visible to compliant vendor pools by location" label="Vendor job board" tone="live" />
-          <QueueRow count={readyStatements.length} detail="Community reporting packages ready for issue" label="Statements ready" tone="finance" />
-          <QueueRow count={12} detail="Service-date passed jobs ready for invoice drafting" label="Bluevine triggers" tone="active" />
+          {priorityDrilldowns.map((item) => (
+            <QueueRow
+              active={activeDrilldown === item.id}
+              count={Number(item.count.replace(/[^0-9]/g, '')) || item.rows.length}
+              detail={item.detail}
+              key={item.id}
+              label={item.label}
+              onSelect={() => setActiveDrilldown(item.id)}
+              tone={item.id === 'priority-board' ? 'live' : item.id === 'priority-statements' ? 'finance' : item.id === 'priority-invoices' ? 'active' : 'review'}
+            />
+          ))}
         </div>
       </section>
 
-      <MetricGrid metrics={metrics} />
+      <MetricGrid
+        activeMetricId={activeDrilldown}
+        metrics={metrics}
+        onSelectMetric={(metricId) => setActiveDrilldown(metricId)}
+      />
 
       <section className="workflow-panel">
         {['Resident request', 'Board release', 'Vendor claim', 'Task control', 'Service passed', 'Invoice trigger', 'Statement reporting'].map((step, index) => (
@@ -966,10 +1154,7 @@ function CommandModule({
             ))}
           </div>
         </div>
-
-        <div className="image-panel">
-          <img src="/flairo-assets/flairo-identity-board.png" alt="FLAIRO identity board" />
-        </div>
+        <OperationalModel />
       </section>
     </>
   );
@@ -1555,7 +1740,13 @@ function ReportsModule({
             The reporting model follows the supplied FLAIRO workbook: property details, service period, gross revenue, vendor remittance, adjustments, net deposit, rewards liability, and community-facing tie-outs.
           </p>
         </div>
-        <img src="/flairo-assets/flairo-brand-board.png" alt="FLAIRO brand board" />
+        <div className="statement-checklist" aria-label="statement controls">
+          <span>Property tie-out</span>
+          <span>Service period</span>
+          <span>Vendor remittance</span>
+          <span>Rewards liability</span>
+          <span>Net deposit</span>
+        </div>
       </section>
     </>
   );
@@ -1610,43 +1801,63 @@ function SettingsModule({
 }
 
 function MetricGrid({
+  activeMetricId,
   metrics,
+  onSelectMetric,
 }: {
-  metrics: Array<{ label: string; value: string; detail: string }>;
+  activeMetricId?: string;
+  metrics: Metric[];
+  onSelectMetric?: (metricId: string) => void;
 }) {
   return (
     <section className="metric-grid" aria-label="business metrics">
       {metrics.map((metric) => (
-        <article className="metric-card" key={metric.label}>
+        <button
+          aria-pressed={metric.id ? activeMetricId === metric.id : undefined}
+          className={`metric-card ${metric.id && activeMetricId === metric.id ? 'selected' : ''}`}
+          disabled={!metric.id || !onSelectMetric}
+          key={metric.label}
+          onClick={() => metric.id && onSelectMetric?.(metric.id)}
+          type="button"
+        >
           <p>{metric.label}</p>
           <strong>{metric.value}</strong>
           <span>{metric.detail}</span>
-        </article>
+        </button>
       ))}
     </section>
   );
 }
 
 function QueueRow({
+  active,
   count,
   detail,
   label,
+  onSelect,
   tone,
 }: {
+  active?: boolean;
   count: number;
   detail: string;
   label: string;
+  onSelect?: () => void;
   tone: string;
 }) {
   return (
-    <div className="queue-row">
+    <button
+      aria-pressed={active}
+      className={`queue-row drill-trigger ${active ? 'selected' : ''}`}
+      onClick={onSelect}
+      type="button"
+    >
       <span className={`queue-dot ${tone}`} />
       <div>
         <strong>{label}</strong>
         <p>{detail}</p>
       </div>
       <b>{count}</b>
-    </div>
+    </button>
   );
 }
 

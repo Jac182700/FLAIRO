@@ -119,7 +119,7 @@ a:focus-visible {
   display: flex;
   width: 100%;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 10px;
   border: 1px solid transparent;
   border-radius: 7px;
@@ -130,24 +130,11 @@ a:focus-visible {
   text-align: left;
 }
 
-.nav-link b {
-  color: #7f7976;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .nav-link.active,
 .nav-link:hover {
   border-color: rgba(247, 134, 199, 0.34);
   background: rgba(247, 134, 199, 0.09);
   color: #ffffff;
-}
-
-.nav-link.active b,
-.nav-link:hover b {
-  color: var(--pink);
 }
 
 .side-card {
@@ -166,11 +153,33 @@ a:focus-visible {
 }
 
 .workspace {
+  position: relative;
   display: grid;
   align-content: start;
   gap: 18px;
   min-width: 0;
+  overflow: hidden;
   padding: 24px;
+}
+
+.workspace::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image: url('/flairo-assets/flairo-identity-board.png');
+  background-position: right 8% top 2%;
+  background-repeat: no-repeat;
+  background-size: min(920px, 78vw) auto;
+  content: '';
+  filter: saturate(1.1);
+  mask-image: radial-gradient(circle at 75% 18%, #000 0 34%, transparent 68%);
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+.workspace > * {
+  position: relative;
+  z-index: 1;
 }
 
 .topbar,
@@ -180,8 +189,7 @@ a:focus-visible {
 .table-panel,
 .workflow-panel,
 .section-band,
-.statement-strip,
-.image-panel {
+.statement-strip {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(21, 21, 23, 0.9);
@@ -274,7 +282,6 @@ a:focus-visible {
 
 .command-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 230px;
   gap: 20px;
   min-height: 300px;
   overflow: hidden;
@@ -283,25 +290,8 @@ a:focus-visible {
 
 .command-panel h2 {
   max-width: 850px;
-  font-size: clamp(30px, 4vw, 54px);
+  font-size: clamp(24px, 3vw, 34px);
   line-height: 1.02;
-}
-
-.panel-copy p:last-child {
-  max-width: 760px;
-  margin: 16px 0 0;
-  color: var(--ivory-2);
-  font-size: 16px;
-  line-height: 1.62;
-}
-
-.hero-logo {
-  align-self: center;
-  width: 100%;
-  max-height: 230px;
-  border: 1px solid rgba(247, 134, 199, 0.25);
-  border-radius: 8px;
-  object-fit: cover;
 }
 
 .queue-panel {
@@ -347,6 +337,84 @@ a:focus-visible {
   line-height: 1;
 }
 
+.attention-panel {
+  align-content: start;
+}
+
+.section-heading.tight {
+  align-items: start;
+  margin-bottom: 0;
+}
+
+.drilldown-count {
+  min-width: 74px;
+  color: var(--dusty-pink);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(34px, 5vw, 62px);
+  font-weight: 500;
+  line-height: 0.95;
+  text-align: right;
+}
+
+.drilldown-summary {
+  max-width: 780px;
+  margin: 0;
+  color: var(--ivory-2);
+  font-size: 15px;
+  line-height: 1.48;
+}
+
+.drilldown-list {
+  display: grid;
+  gap: 8px;
+}
+
+.drilldown-row {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr 0.9fr 0.8fr;
+  gap: 10px;
+  align-items: center;
+  min-height: 42px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 8px;
+}
+
+.drilldown-row span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.drilldown-row span:first-child {
+  color: #ffffff;
+  font-weight: 850;
+}
+
+.drilldown-empty {
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  padding-top: 14px;
+}
+
+.drill-trigger {
+  width: 100%;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.drill-trigger:hover,
+.drill-trigger.selected {
+  background: rgba(247, 134, 199, 0.08);
+}
+
+.drill-trigger.selected {
+  border-top-color: rgba(247, 134, 199, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(247, 134, 199, 0.16);
+}
+
 .queue-dot {
   width: 10px;
   height: 10px;
@@ -374,8 +442,23 @@ a:focus-visible {
 }
 
 .metric-card {
+  width: 100%;
   min-height: 132px;
+  background: rgba(21, 21, 23, 0.9);
+  color: var(--ivory);
   padding: 16px;
+  text-align: left;
+}
+
+.metric-card:not(:disabled):hover,
+.metric-card.selected {
+  border-color: rgba(247, 134, 199, 0.48);
+  background: rgba(247, 134, 199, 0.1);
+}
+
+.metric-card:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
 .metric-card p,
@@ -518,19 +601,6 @@ button:hover {
   display: block;
   margin-top: 4px;
   color: #ffffff;
-}
-
-.image-panel {
-  overflow: hidden;
-  min-height: 300px;
-}
-
-.image-panel img,
-.statement-strip img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
 }
 
 .section-band {
@@ -869,9 +939,20 @@ button:hover {
   line-height: 1.55;
 }
 
-.statement-strip img {
-  max-height: 190px;
+.statement-checklist {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+}
+
+.statement-checklist span {
+  border: 1px solid rgba(212, 175, 55, 0.25);
   border-radius: 8px;
+  background: rgba(212, 175, 55, 0.07);
+  color: var(--ivory-2);
+  font-size: 13px;
+  font-weight: 800;
+  padding: 10px 12px;
 }
 
 @media (max-width: 1280px) {
@@ -912,9 +993,6 @@ button:hover {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
-  .image-panel {
-    max-height: 440px;
-  }
 }
 
 @media (max-width: 760px) {
@@ -953,7 +1031,8 @@ button:hover {
   .doc-grid,
   .task-grid,
   .statement-numbers,
-  .workflow-panel {
+  .workflow-panel,
+  .drilldown-row {
     grid-template-columns: 1fr;
   }
 

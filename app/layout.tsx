@@ -5,6 +5,9 @@ export const metadata: Metadata = {
   title: 'FLAIRO Control Center',
   description:
     'Employee operations workspace for FLAIRO resident benefit program management.',
+  icons: {
+    icon: ['/favicon.ico', '/favicon.svg'],
+  },
   openGraph: {
     title: 'FLAIRO Control Center',
     description:
