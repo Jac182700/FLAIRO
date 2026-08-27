@@ -4,12 +4,12 @@ import ControlCenter from './control-center';
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
-  const user = await getChatGPTUser();
+  await getChatGPTUser();
 
   return (
     <ControlCenter
-      viewerEmail={user?.email ?? 'local-preview@flairo.internal'}
-      viewerName={user?.displayName ?? 'FLAIRO employee'}
+      viewerEmail="INFO@FLAIRO.ORG"
+      viewerName="FLAIRO Administrator"
     />
   );
 }

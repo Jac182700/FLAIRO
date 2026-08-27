@@ -182,6 +182,21 @@ export const invoiceTriggers = sqliteTable(
   ],
 );
 
+export const mobileSyncState = sqliteTable(
+  'mobile_sync_state',
+  {
+    id: text('id').primaryKey(),
+    connectionStatus: text('connection_status').notNull(),
+    lastCheckedAt: text('last_checked_at').notNull(),
+    lastPushAt: text('last_push_at'),
+    pendingChanges: integer('pending_changes').notNull().default(0),
+    revision: integer('revision').notNull().default(0),
+    lastPushSummary: text('last_push_summary').notNull().default('No mobile app push yet'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [index('idx_mobile_sync_updated_at').on(table.updatedAt)],
+);
+
 export const communityStatements = sqliteTable(
   'community_statements',
   {

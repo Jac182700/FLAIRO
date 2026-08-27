@@ -431,6 +431,7 @@ export async function GET() {
   try {
     await initializeDatabase(env.DB);
     await seedDatabase(env.DB);
+    await touchMobileConnection(env.DB);
     return Response.json(await readState(env.DB));
   } catch (error) {
     return Response.json({ error: readableError(error) }, { status: 500 });
@@ -443,6 +444,7 @@ export async function POST(request: Request) {
     await seedDatabase(env.DB);
     const body = await request.json() as { action?: string; payload?: Record<string, string> };
     const payload = body.payload ?? {};
+    let stageMobileChange = false;
 
     switch (body.action) {
       case 'toggle_service_visibility':
@@ -450,34 +452,50 @@ export async function POST(request: Request) {
           .bind(now(), payload.serviceId)
           .run();
         await logEvent('Mobile catalog', payload.serviceId ?? 'service', 'Employee changed resident app service visibility.');
+        stageMobileChange = true;
         break;
       case 'upload_document':
         await recordDocumentUpload(payload.vendorId, payload.documentType);
+        stageMobileChange = true;
         break;
       case 'approve_vendor':
         await approveVendor(payload.vendorId);
+        stageMobileChange = true;
         break;
       case 'claim_job':
         await claimJob(payload.jobId);
+        stageMobileChange = true;
         break;
       case 'confirm_schedule':
         await confirmSchedule(payload.jobId);
+        stageMobileChange = true;
         break;
       case 'complete_job':
         await completeJob(payload.jobId);
+        stageMobileChange = true;
         break;
       case 'trigger_invoice':
         await triggerInvoice(payload.jobId);
+        stageMobileChange = true;
         break;
       case 'mark_statement_issued':
         await env.DB.prepare('UPDATE communities SET statement_status = ?, updated_at = ? WHERE id = ?')
           .bind('Issued', now(), payload.communityId)
           .run();
         await logEvent('Statement issued', payload.communityId ?? 'community', 'Community statement marked issued.');
+        stageMobileChange = true;
+        break;
+      case 'push_mobile_update':
+        await pushMobileUpdate();
         break;
       default:
         return Response.json({ error: 'Unknown FLAIRO action.' }, { status: 400 });
     }
+
+    if (stageMobileChange) {
+      await stageMobileDraftChange();
+    }
+    await touchMobileConnection(env.DB);
 
     return Response.json(await readState(env.DB));
   } catch (error) {
@@ -495,6 +513,7 @@ async function initializeDatabase(db: D1Database) {
     db.prepare('CREATE TABLE IF NOT EXISTS job_orders (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, vendor_id TEXT, task_status TEXT NOT NULL, service_date TEXT, schedule_confirmed_at TEXT, vendor_confirmed_at TEXT, payment_consult_status TEXT NOT NULL DEFAULT "Not started", resident_paid_vendor INTEGER NOT NULL DEFAULT 0, service_amount_cents INTEGER NOT NULL, flairo_fee_cents INTEGER NOT NULL, points INTEGER NOT NULL DEFAULT 0, invoice_trigger_status TEXT NOT NULL DEFAULT "Waiting", created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS reward_ledger_entries (id TEXT PRIMARY KEY, resident_name TEXT NOT NULL, community_id TEXT NOT NULL, request_id TEXT, entry_type TEXT NOT NULL, status TEXT NOT NULL, points INTEGER NOT NULL, dollar_value_cents INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL, created_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS invoice_triggers (id TEXT PRIMARY KEY, job_order_id TEXT NOT NULL, vendor_id TEXT NOT NULL, amount_cents INTEGER NOT NULL, status TEXT NOT NULL, bluevine_reference TEXT, due_date TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
+    db.prepare('CREATE TABLE IF NOT EXISTS mobile_sync_state (id TEXT PRIMARY KEY, connection_status TEXT NOT NULL, last_checked_at TEXT NOT NULL, last_push_at TEXT, pending_changes INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0, last_push_summary TEXT NOT NULL DEFAULT "No mobile app push yet", updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, subject TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL)'),
   ]);
   await db.batch([
@@ -502,7 +521,9 @@ async function initializeDatabase(db: D1Database) {
     db.prepare('CREATE INDEX IF NOT EXISTS idx_jobs_invoice ON job_orders (invoice_trigger_status)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_vendors_access ON vendors (board_access, compliance_status)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_rewards_status ON reward_ledger_entries (status)'),
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_mobile_sync_updated_at ON mobile_sync_state (updated_at)'),
   ]);
+  await ensureMobileSyncState(db);
 }
 
 async function seedDatabase(db: D1Database) {
@@ -570,6 +591,7 @@ async function readState(db: D1Database) {
   const rewardRows = await db.prepare('SELECT * FROM reward_ledger_entries ORDER BY created_at DESC, id DESC').all();
   const invoiceRows = await db.prepare('SELECT * FROM invoice_triggers ORDER BY created_at DESC, id DESC').all();
   const auditRows = await db.prepare('SELECT * FROM audit_events ORDER BY created_at DESC, id DESC LIMIT 20').all();
+  const mobileSyncRow = await db.prepare('SELECT * FROM mobile_sync_state WHERE id = ?').bind('default').first<Record<string, unknown>>();
 
   return {
     audit: auditRows.results.map((row) => ({
@@ -660,7 +682,58 @@ async function readState(db: D1Database) {
       status: String(row.compliance_status),
       w9: String(row.w9_status),
     })),
+    mobileSync: {
+      connectionStatus: String(mobileSyncRow?.connection_status ?? 'Live app bridge online'),
+      lastCheckedAt: labelDateTime(String(mobileSyncRow?.last_checked_at ?? now())),
+      lastPushAt: mobileSyncRow?.last_push_at ? labelDateTime(String(mobileSyncRow.last_push_at)) : 'No mobile app push yet',
+      lastPushSummary: String(mobileSyncRow?.last_push_summary ?? 'No mobile app push yet'),
+      pendingChanges: Number(mobileSyncRow?.pending_changes ?? 0),
+      revision: Number(mobileSyncRow?.revision ?? 0),
+    },
   };
+}
+
+async function ensureMobileSyncState(db: D1Database) {
+  const stamp = now();
+  await db.prepare('INSERT OR IGNORE INTO mobile_sync_state (id, connection_status, last_checked_at, last_push_at, pending_changes, revision, last_push_summary, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind('default', 'Live app bridge online', stamp, null, 0, 0, 'No mobile app push yet', stamp)
+    .run();
+}
+
+async function touchMobileConnection(db: D1Database) {
+  const row = await db.prepare('SELECT pending_changes FROM mobile_sync_state WHERE id = ?')
+    .bind('default')
+    .first<{ pending_changes: number }>();
+  const stamp = now();
+  const status = (row?.pending_changes ?? 0) > 0
+    ? 'Live app bridge online • mobile changes staged'
+    : 'Live app bridge online';
+
+  await db.prepare('UPDATE mobile_sync_state SET connection_status = ?, last_checked_at = ?, updated_at = ? WHERE id = ?')
+    .bind(status, stamp, stamp, 'default')
+    .run();
+}
+
+async function stageMobileDraftChange() {
+  const stamp = now();
+  await env.DB.prepare('UPDATE mobile_sync_state SET pending_changes = pending_changes + 1, revision = revision + 1, connection_status = ?, updated_at = ? WHERE id = ?')
+    .bind('Live app bridge online • mobile changes staged', stamp, 'default')
+    .run();
+}
+
+async function pushMobileUpdate() {
+  const stamp = now();
+  await env.DB.prepare('UPDATE mobile_sync_state SET pending_changes = 0, revision = revision + 1, connection_status = ?, last_checked_at = ?, last_push_at = ?, last_push_summary = ?, updated_at = ? WHERE id = ?')
+    .bind(
+      'Live app bridge online • mobile app current',
+      stamp,
+      stamp,
+      'Manual push sent staged catalog, job-board, rewards, vendor, and reporting updates.',
+      stamp,
+      'default',
+    )
+    .run();
+  await logEvent('Mobile app push', 'mobile-app', 'Manual mobile application update completed from the FLAIRO control center.');
 }
 
 async function recordDocumentUpload(vendorId?: string, documentType?: string) {
@@ -757,7 +830,7 @@ async function triggerInvoice(jobId?: string) {
 
 async function logEvent(action: string, subject: string, detail: string) {
   await env.DB.prepare('INSERT INTO audit_events (id, actor, action, subject, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .bind(`A-${Date.now()}-${Math.floor(Math.random() * 1000)}`, 'FLAIRO employee', action, subject, detail, now())
+    .bind(`A-${Date.now()}-${Math.floor(Math.random() * 1000)}`, 'FLAIRO Administrator', action, subject, detail, now())
     .run();
 }
 
@@ -786,6 +859,18 @@ function labelTime(value: string) {
   if (diffMinutes < 60) return `${diffMinutes} min ago`;
   if (diffMinutes < 1440) return `${Math.round(diffMinutes / 60)} hr ago`;
   return new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function labelDateTime(value: string) {
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return value;
+  return new Date(timestamp).toLocaleString('en-US', {
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 
 function readableError(error: unknown) {

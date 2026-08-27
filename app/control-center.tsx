@@ -114,6 +114,15 @@ type AuditEntry = {
   time: string;
 };
 
+type MobileSync = {
+  connectionStatus: string;
+  lastCheckedAt: string;
+  lastPushAt: string;
+  lastPushSummary: string;
+  pendingChanges: number;
+  revision: number;
+};
+
 type Metric = {
   id?: string;
   label: string;
@@ -134,6 +143,7 @@ type FlairoState = {
   communities: Community[];
   invoices: InvoiceTrigger[];
   jobs: Job[];
+  mobileSync: MobileSync;
   rewards: RewardEntry[];
   services: Service[];
   vendors: Vendor[];
@@ -507,6 +517,15 @@ const initialAudit: AuditEntry[] = [
   },
 ];
 
+const initialMobileSync: MobileSync = {
+  connectionStatus: 'Checking live app bridge',
+  lastCheckedAt: 'Checking now',
+  lastPushAt: 'No mobile app push yet',
+  lastPushSummary: 'Autosaved control-center changes wait here until an administrator pushes them to the mobile app.',
+  pendingChanges: 0,
+  revision: 0,
+};
+
 function dollars(value: number) {
   return value.toLocaleString('en-US', {
     currency: 'USD',
@@ -518,6 +537,16 @@ function dollars(value: number) {
 
 function percent(value: number) {
   return `${value.toFixed(0)}%`;
+}
+
+function localDateTime(value = new Date()) {
+  return value.toLocaleString('en-US', {
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 
 export default function ControlCenter({
@@ -535,13 +564,16 @@ export default function ControlCenter({
   const [invoices, setInvoices] = useState<InvoiceTrigger[]>(initialInvoices);
   const [communities, setCommunities] = useState<Community[]>(initialCommunities);
   const [audit, setAudit] = useState<AuditEntry[]>(initialAudit);
-  const [syncStatus, setSyncStatus] = useState('Connecting to FLAIRO data');
+  const [mobileSync, setMobileSync] = useState<MobileSync>(initialMobileSync);
+  const [syncStatus, setSyncStatus] = useState('Checking live app bridge');
+  const [mobilePushStatus, setMobilePushStatus] = useState('Push to mobile app');
 
   const applyServerState = (state: Partial<FlairoState>) => {
     if (state.audit) setAudit(state.audit);
     if (state.communities) setCommunities(state.communities);
     if (state.invoices) setInvoices(state.invoices);
     if (state.jobs) setJobs(state.jobs);
+    if (state.mobileSync) setMobileSync(state.mobileSync);
     if (state.rewards) setRewards(state.rewards);
     if (state.services) setServices(state.services);
     if (state.vendors) setVendors(state.vendors);
@@ -549,29 +581,41 @@ export default function ControlCenter({
 
   useEffect(() => {
     let active = true;
+    let timer: ReturnType<typeof setInterval> | undefined;
 
-    fetch('/api/flairo')
-      .then((response) => {
-        if (!response.ok) throw new Error('FLAIRO data unavailable');
-        return response.json() as Promise<FlairoState>;
-      })
-      .then((state) => {
-        if (!active) return;
-        applyServerState(state);
-        setSyncStatus('Synced to FLAIRO data store');
-      })
-      .catch(() => {
-        if (!active) return;
-        setSyncStatus('Local preview data');
-      });
+    const loadState = () => {
+      fetch('/api/flairo')
+        .then((response) => {
+          if (!response.ok) throw new Error('FLAIRO data unavailable');
+          return response.json() as Promise<FlairoState>;
+        })
+        .then((state) => {
+          if (!active) return;
+          applyServerState(state);
+          setSyncStatus(state.mobileSync?.connectionStatus ?? 'Live app bridge online');
+        })
+        .catch(() => {
+          if (!active) return;
+          setSyncStatus('Live app bridge unavailable');
+          setMobileSync((current) => ({
+            ...current,
+            connectionStatus: 'Live app bridge unavailable',
+            lastCheckedAt: localDateTime(),
+          }));
+        });
+    };
+
+    loadState();
+    timer = setInterval(loadState, 15000);
 
     return () => {
       active = false;
+      if (timer) clearInterval(timer);
     };
   }, []);
 
   const persistAction = async (action: string, payload: Record<string, string>) => {
-    setSyncStatus('Saving changes');
+    setSyncStatus('Autosaving to control center');
     try {
       const response = await fetch('/api/flairo', {
         body: JSON.stringify({ action, payload }),
@@ -581,9 +625,15 @@ export default function ControlCenter({
       if (!response.ok) throw new Error('Save failed');
       const state = await response.json() as FlairoState;
       applyServerState(state);
-      setSyncStatus('Synced to FLAIRO data store');
+      setSyncStatus(state.mobileSync?.connectionStatus ?? 'Autosaved; mobile push pending');
     } catch {
-      setSyncStatus('Local changes staged');
+      setSyncStatus('Autosaved locally; mobile push pending');
+      setMobileSync((current) => ({
+        ...current,
+        connectionStatus: 'Local changes staged for mobile',
+        lastCheckedAt: localDateTime(),
+        pendingChanges: current.pendingChanges + 1,
+      }));
     }
   };
 
@@ -790,6 +840,35 @@ export default function ControlCenter({
     void persistAction('mark_statement_issued', { communityId });
   };
 
+  const pushMobileUpdate = async () => {
+    setMobilePushStatus('Pushing updates');
+    setSyncStatus('Pushing staged updates to mobile app');
+    try {
+      const response = await fetch('/api/flairo', {
+        body: JSON.stringify({ action: 'push_mobile_update', payload: {} }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      if (!response.ok) throw new Error('Mobile push failed');
+      const state = await response.json() as FlairoState;
+      applyServerState(state);
+      setSyncStatus(state.mobileSync?.connectionStatus ?? 'Mobile app current');
+      setMobilePushStatus('Push to mobile app');
+    } catch {
+      setSyncStatus('Mobile app push needs retry');
+      setMobilePushStatus('Retry mobile push');
+      setMobileSync((current) => ({
+        ...current,
+        connectionStatus: 'Mobile app push needs retry',
+        lastCheckedAt: localDateTime(),
+      }));
+    }
+  };
+
+  const pendingMobileCopy = mobileSync.pendingChanges === 1
+    ? '1 autosaved change waiting'
+    : `${mobileSync.pendingChanges} autosaved changes waiting`;
+
   return (
     <main className="app-shell">
       <aside className="side-nav" aria-label="FLAIRO employee navigation">
@@ -830,10 +909,19 @@ export default function ControlCenter({
             <h1>{moduleTitle(activeModule)}</h1>
           </div>
           <div className="topbar-actions">
-            <div className="sync-panel">
-              <span>Data status</span>
+            <div className="sync-panel live-panel">
+              <span>Live app connection</span>
               <strong>{syncStatus}</strong>
+              <em>Checked {mobileSync.lastCheckedAt}</em>
             </div>
+            <div className="sync-panel mobile-push-panel">
+              <span>Last mobile update</span>
+              <strong>{mobileSync.lastPushAt}</strong>
+              <em>{pendingMobileCopy}</em>
+            </div>
+            <button className="mobile-push-button" onClick={pushMobileUpdate} type="button">
+              {mobilePushStatus}
+            </button>
             <div className="user-panel">
               <span>{viewerName}</span>
               <strong>{viewerEmail}</strong>
