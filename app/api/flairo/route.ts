@@ -478,6 +478,10 @@ export async function POST(request: Request) {
         await triggerInvoice(payload.jobId);
         stageMobileChange = true;
         break;
+      case 'process_vendor_month':
+        await processVendorMonth(payload.vendorId, payload.monthKey);
+        stageMobileChange = true;
+        break;
       case 'mark_statement_issued':
         await env.DB.prepare('UPDATE communities SET statement_status = ?, updated_at = ? WHERE id = ?')
           .bind('Issued', now(), payload.communityId)
@@ -826,6 +830,75 @@ async function triggerInvoice(jobId?: string) {
       .bind('Draft queued', stamp, job.id),
   ]);
   await logEvent('Bluevine invoice trigger', invoiceId, `Invoice draft queued for ${job.id}.`);
+}
+
+async function processVendorMonth(vendorId?: string, monthKey?: string) {
+  if (!vendorId || !monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) return;
+  const [year, month] = monthKey.split('-').map(Number);
+  if (!year || !month || month < 1 || month > 12) return;
+
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  const startDate = `${monthKey}-01`;
+  const endDate = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
+  const stamp = now();
+  const readyRows = await env.DB.prepare(`
+    SELECT id, flairo_fee_cents
+    FROM job_orders
+    WHERE vendor_id = ?
+      AND service_date >= ?
+      AND service_date < ?
+      AND invoice_trigger_status != ?
+      AND (invoice_trigger_status IN (?, ?) OR task_status = ?)
+  `)
+    .bind(vendorId, startDate, endDate, 'Sent', 'Ready', 'Draft queued', 'Completed')
+    .all<Record<string, unknown>>();
+  const missingInvoiceInserts: D1PreparedStatement[] = [];
+
+  for (const row of readyRows.results) {
+    const jobId = String(row.id);
+    const existing = await env.DB.prepare('SELECT id FROM invoice_triggers WHERE job_order_id = ? AND vendor_id = ? LIMIT 1')
+      .bind(jobId, vendorId)
+      .first<{ id: string }>();
+
+    if (!existing) {
+      missingInvoiceInserts.push(
+        env.DB.prepare('INSERT INTO invoice_triggers (id, job_order_id, vendor_id, amount_cents, status, bluevine_reference, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .bind(`INV-M-${monthKey.replace('-', '')}-${jobId}`, jobId, vendorId, Number(row.flairo_fee_cents), 'Sent', 'Month-end invoice processed', 'Net 7', stamp, stamp),
+      );
+    }
+  }
+
+  if (missingInvoiceInserts.length) {
+    await env.DB.batch(missingInvoiceInserts);
+  }
+
+  await env.DB.batch([
+    env.DB.prepare(`
+      UPDATE job_orders
+      SET invoice_trigger_status = ?, updated_at = ?
+      WHERE vendor_id = ?
+        AND service_date >= ?
+        AND service_date < ?
+        AND invoice_trigger_status != ?
+        AND (invoice_trigger_status IN (?, ?) OR task_status = ?)
+    `)
+      .bind('Sent', stamp, vendorId, startDate, endDate, 'Sent', 'Ready', 'Draft queued', 'Completed'),
+    env.DB.prepare(`
+      UPDATE invoice_triggers
+      SET status = ?, bluevine_reference = ?, updated_at = ?
+      WHERE vendor_id = ?
+        AND job_order_id IN (
+          SELECT id
+          FROM job_orders
+          WHERE vendor_id = ?
+            AND service_date >= ?
+            AND service_date < ?
+        )
+    `)
+      .bind('Sent', 'Month-end invoice processed', stamp, vendorId, vendorId, startDate, endDate),
+  ]);
+  await logEvent('Vendor month processed', vendorId, `Month-end invoice processing completed for ${monthKey}.`);
 }
 
 async function logEvent(action: string, subject: string, detail: string) {

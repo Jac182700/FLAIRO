@@ -138,6 +138,17 @@ type Drilldown = {
   rows: string[][];
 };
 
+type VendorMonthRow = {
+  vendorId: string;
+  vendorName: string;
+  jobs: Job[];
+  residentTotal: number;
+  flairoPayout: number;
+  readyCount: number;
+  waitingCount: number;
+  services: string;
+};
+
 type FlairoState = {
   audit: AuditEntry[];
   communities: Community[];
@@ -830,6 +841,36 @@ export default function ControlCenter({
     void persistAction('trigger_invoice', { jobId });
   };
 
+  const processVendorMonth = (vendorId: string, monthKey: string) => {
+    const readyJobs = jobs.filter(
+      (job) =>
+        job.vendorId === vendorId &&
+        jobInMonth(job, monthKey) &&
+        job.invoiceStatus !== 'Sent' &&
+        jobInvoiceActionable(job),
+    );
+    if (!readyJobs.length) {
+      addAudit('Month closeout waiting', `${vendorName(vendorId, vendors)} has no invoice-ready jobs for ${labelMonth(monthKey)}.`);
+      return;
+    }
+
+    const readyJobIds = new Set(readyJobs.map((job) => job.id));
+    setJobs((current) =>
+      current.map((job) =>
+        readyJobIds.has(job.id) ? { ...job, invoiceStatus: 'Sent' } : job,
+      ),
+    );
+    setInvoices((current) =>
+      current.map((invoice) =>
+        readyJobIds.has(invoice.jobId)
+          ? { ...invoice, status: 'Sent', reference: 'Month-end invoice processed' }
+          : invoice,
+      ),
+    );
+    addAudit('Vendor month processed', `${vendorName(vendorId, vendors)} ${labelMonth(monthKey)} invoices processed; active tally reset.`);
+    void persistAction('process_vendor_month', { monthKey, vendorId });
+  };
+
   const markStatementIssued = (communityId: string) => {
     setCommunities((current) =>
       current.map((community) =>
@@ -931,11 +972,11 @@ export default function ControlCenter({
 
         {activeModule === 'command' && (
           <CommandModule
-            audit={audit}
             communities={communities}
             invoices={invoices}
             jobs={jobs}
             metrics={metrics}
+            openInvoices={() => setActiveModule('invoices')}
             rewards={rewards}
             vendors={vendors}
           />
@@ -985,6 +1026,7 @@ export default function ControlCenter({
           <InvoicesModule
             invoices={invoices}
             jobs={jobs}
+            processVendorMonth={processVendorMonth}
             triggerInvoice={triggerInvoice}
             vendors={vendors}
           />
@@ -1006,19 +1048,19 @@ export default function ControlCenter({
 }
 
 function CommandModule({
-  audit,
   communities,
   invoices,
   jobs,
   metrics,
+  openInvoices,
   rewards,
   vendors,
 }: {
-  audit: AuditEntry[];
   communities: Community[];
   invoices: InvoiceTrigger[];
   jobs: Job[];
   metrics: Metric[];
+  openInvoices: () => void;
   rewards: RewardEntry[];
   vendors: Vendor[];
 }) {
@@ -1215,35 +1257,11 @@ function CommandModule({
         onSelectMetric={(metricId) => setActiveDrilldown(metricId)}
       />
 
-      <section className="workflow-panel">
-        {['Resident request', 'Board release', 'Vendor claim', 'Task control', 'Service passed', 'Invoice trigger', 'Statement reporting'].map((step, index) => (
-          <div className="workflow-step" key={step}>
-            <span>{String(index + 1).padStart(2, '0')}</span>
-            <strong>{step}</strong>
-          </div>
-        ))}
-      </section>
-
-      <section className="split-grid">
-        <div className="table-panel">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Employee activity</p>
-              <h2>Recent control log</h2>
-            </div>
-          </div>
-          <div className="activity-list">
-            {audit.slice(0, 5).map((entry) => (
-              <div className="activity-row" key={entry.id}>
-                <span>{entry.time}</span>
-                <strong>{entry.action}</strong>
-                <p>{entry.detail}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-        <OperationalModel />
-      </section>
+      <VendorMonthCloseoutPanel
+        jobs={jobs}
+        onOpenInvoices={openInvoices}
+        vendors={vendors}
+      />
     </>
   );
 }
@@ -1302,32 +1320,29 @@ function MobileControlsModule({
         </div>
       </section>
 
-      <section className="split-grid">
-        <div className="table-panel">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Locations</p>
-              <h2>Community app availability</h2>
-            </div>
-          </div>
-          <div className="compact-table">
-            <div className="compact-row header">
-              <span>Community</span>
-              <span>PLUS</span>
-              <span>Penetration</span>
-              <span>Net income</span>
-            </div>
-            {communities.map((community) => (
-              <div className="compact-row" key={community.id}>
-                <span>{community.name}</span>
-                <span>{community.plusMembers} members</span>
-                <span>{percent(community.servicePenetration)}</span>
-                <span>{dollars(community.netIncome)}</span>
-              </div>
-            ))}
+      <section className="table-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Locations</p>
+            <h2>Community app availability</h2>
           </div>
         </div>
-        <OperationalModel />
+        <div className="compact-table">
+          <div className="compact-row header">
+            <span>Community</span>
+            <span>PLUS</span>
+            <span>Penetration</span>
+            <span>Net income</span>
+          </div>
+          {communities.map((community) => (
+            <div className="compact-row" key={community.id}>
+              <span>{community.name}</span>
+              <span>{community.plusMembers} members</span>
+              <span>{percent(community.servicePenetration)}</span>
+              <span>{dollars(community.netIncome)}</span>
+            </div>
+          ))}
+        </div>
       </section>
     </>
   );
@@ -1676,15 +1691,17 @@ function RewardsModule({
 function InvoicesModule({
   invoices,
   jobs,
+  processVendorMonth,
   triggerInvoice,
   vendors,
 }: {
   invoices: InvoiceTrigger[];
   jobs: Job[];
+  processVendorMonth: (vendorId: string, monthKey: string) => void;
   triggerInvoice: (jobId: string) => void;
   vendors: Vendor[];
 }) {
-  const readyJobs = jobs.filter((job) => job.invoiceStatus === 'Ready' || job.boardStatus === 'Completed');
+  const readyJobs = jobs.filter((job) => job.invoiceStatus !== 'Sent' && jobInvoiceActionable(job));
 
   return (
     <>
@@ -1699,6 +1716,13 @@ function InvoicesModule({
           <StatusPill label="Trigger" status="Service date passed" />
         </div>
       </section>
+
+      <VendorMonthCloseoutPanel
+        invoiceMode
+        jobs={jobs}
+        processVendorMonth={processVendorMonth}
+        vendors={vendors}
+      />
 
       <section className="split-grid">
         <div className="table-panel">
@@ -1888,6 +1912,100 @@ function SettingsModule({
   );
 }
 
+function VendorMonthCloseoutPanel({
+  invoiceMode = false,
+  jobs,
+  onOpenInvoices,
+  processVendorMonth,
+  vendors,
+}: {
+  invoiceMode?: boolean;
+  jobs: Job[];
+  onOpenInvoices?: () => void;
+  processVendorMonth?: (vendorId: string, monthKey: string) => void;
+  vendors: Vendor[];
+}) {
+  const monthKey = currentMonthKey();
+  const rows = buildVendorMonthRows(jobs, vendors, monthKey);
+  const residentTotal = rows.reduce((sum, row) => sum + row.residentTotal, 0);
+  const flairoPayout = rows.reduce((sum, row) => sum + row.flairoPayout, 0);
+  const readyJobs = rows.reduce((sum, row) => sum + row.readyCount, 0);
+  const waitingJobs = rows.reduce((sum, row) => sum + row.waitingCount, 0);
+
+  return (
+    <section className={`table-panel vendor-month-panel${invoiceMode ? ' invoice-mode' : ''}`}>
+      <div className="section-heading vendor-month-head">
+        <div>
+          <p className="eyebrow">{invoiceMode ? 'Month-end invoicing' : 'Current month vendor activity'}</p>
+          <h2>{labelMonth(monthKey)} vendor income closeout</h2>
+        </div>
+        {onOpenInvoices && (
+          <button type="button" onClick={onOpenInvoices}>
+            Open month-end invoices
+          </button>
+        )}
+      </div>
+
+      <div className="vendor-month-summary">
+        <InfoTile label="Active vendors" value={String(rows.length)} />
+        <InfoTile label="Resident service total" value={dollars(residentTotal)} />
+        <InfoTile label="Potential FLAIRO payout" value={dollars(flairoPayout)} />
+        <InfoTile label="Ready to invoice" value={String(readyJobs)} />
+        <InfoTile label="Waiting on service" value={String(waitingJobs)} />
+      </div>
+
+      <div className="vendor-month-table" role="table" aria-label="current month vendor closeout">
+        <div className="vendor-month-row header" role="row">
+          <span>Vendor</span>
+          <span>Jobs</span>
+          <span>Resident cost</span>
+          <span>FLAIRO payout</span>
+          <span>Status</span>
+          {invoiceMode && <span>Closeout</span>}
+        </div>
+        {rows.length ? rows.map((row) => {
+          const canProcess = row.readyCount > 0;
+          const buttonLabel = row.waitingCount && row.readyCount
+            ? 'Process ready'
+            : row.readyCount
+              ? 'Mark processed'
+              : 'Waiting';
+
+          return (
+            <div className="vendor-month-row" key={row.vendorId} role="row">
+              <span>
+                <strong>{row.vendorName}</strong>
+                <em>{row.services}</em>
+              </span>
+              <span>{row.jobs.length}</span>
+              <span>{dollars(row.residentTotal)}</span>
+              <span>{dollars(row.flairoPayout)}</span>
+              <span className={`month-status ${row.waitingCount ? 'waiting' : 'ready'}`}>
+                {row.waitingCount ? `${row.waitingCount} waiting` : 'Ready for closeout'}
+              </span>
+              {invoiceMode && (
+                <span>
+                  <button
+                    disabled={!canProcess}
+                    onClick={() => processVendorMonth?.(row.vendorId, monthKey)}
+                    type="button"
+                  >
+                    {buttonLabel}
+                  </button>
+                </span>
+              )}
+            </div>
+          );
+        }) : (
+          <div className="vendor-month-empty">
+            All current-month vendor invoices have been processed. The tally will begin again as new work is booked or completed.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function MetricGrid({
   activeMetricId,
   metrics,
@@ -1976,27 +2094,57 @@ function StatusPill({ label, status }: { label: string; status: string }) {
   );
 }
 
-function OperationalModel() {
-  return (
-    <div className="table-panel">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">Payment model</p>
-          <h2>Direct vendor payment, FLAIRO invoice control</h2>
-        </div>
-      </div>
-      <div className="rule-list">
-        <InfoTile label="Resident payment" value="Resident consults and pays vendor directly" />
-        <InfoTile label="FLAIRO revenue" value="Vendor owes program fee based on completed order" />
-        <InfoTile label="Invoice timing" value="Create draft after scheduled date passes" />
-        <InfoTile label="Membership" value="Resident PLUS revenue remains FLAIRO subscription income" />
-      </div>
-    </div>
-  );
-}
-
 function moduleTitle(activeModule: ModuleId) {
   return navSections.find((section) => section.id === activeModule)?.label ?? 'Command';
+}
+
+function buildVendorMonthRows(jobs: Job[], vendors: Vendor[], monthKey: string): VendorMonthRow[] {
+  return vendors
+    .map((vendor) => {
+      const monthJobs = jobs.filter(
+        (job) =>
+          job.vendorId === vendor.id &&
+          job.boardStatus !== 'Open' &&
+          job.invoiceStatus !== 'Sent' &&
+          jobInMonth(job, monthKey),
+      );
+      const services = Array.from(new Set(monthJobs.map((job) => job.service))).join(', ');
+
+      return {
+        flairoPayout: monthJobs.reduce((sum, job) => sum + job.flairoFee, 0),
+        jobs: monthJobs,
+        readyCount: monthJobs.filter(jobInvoiceActionable).length,
+        residentTotal: monthJobs.reduce((sum, job) => sum + job.amount, 0),
+        services,
+        vendorId: vendor.id,
+        vendorName: vendor.name,
+        waitingCount: monthJobs.filter((job) => !jobInvoiceActionable(job)).length,
+      };
+    })
+    .filter((row) => row.jobs.length > 0)
+    .sort((a, b) => b.flairoPayout - a.flairoPayout);
+}
+
+function jobInvoiceActionable(job: Job) {
+  return job.invoiceStatus === 'Ready' || job.invoiceStatus === 'Draft queued' || job.boardStatus === 'Completed';
+}
+
+function currentMonthKey(date = new Date()) {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${date.getFullYear()}-${month}`;
+}
+
+function jobInMonth(job: Job, monthKey: string) {
+  return job.serviceDate.startsWith(monthKey);
+}
+
+function labelMonth(monthKey: string) {
+  const [year, month] = monthKey.split('-').map(Number);
+  if (!year || !month) return monthKey;
+  return new Date(year, month - 1, 1).toLocaleDateString('en-US', {
+    month: 'long',
+    year: 'numeric',
+  });
 }
 
 function vendorName(vendorId: string, vendors: Vendor[]) {

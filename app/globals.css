@@ -187,7 +187,6 @@ a:focus-visible {
 .queue-panel,
 .metric-card,
 .table-panel,
-.workflow-panel,
 .section-band,
 .statement-strip {
   border: 1px solid var(--line);
@@ -508,40 +507,106 @@ a:focus-visible {
   overflow-wrap: anywhere;
 }
 
-.workflow-panel {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  overflow: hidden;
-}
-
-.workflow-step {
-  min-height: 90px;
-  border-right: 1px solid var(--line-soft);
-  padding: 16px;
-}
-
-.workflow-step:last-child {
-  border-right: 0;
-}
-
-.workflow-step span {
-  color: var(--gold);
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.12em;
-}
-
-.workflow-step strong {
-  display: block;
-  margin-top: 11px;
-  color: #ffffff;
-  line-height: 1.25;
-}
-
 .split-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 0.75fr);
   gap: 18px;
+}
+
+.vendor-month-panel {
+  overflow: hidden;
+}
+
+.vendor-month-head {
+  align-items: center;
+}
+
+.vendor-month-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.vendor-month-table {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+}
+
+.vendor-month-row {
+  display: grid;
+  grid-template-columns: minmax(210px, 1.55fr) minmax(62px, 0.35fr) repeat(3, minmax(130px, 0.8fr));
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--line-soft);
+  padding: 13px 14px;
+}
+
+.vendor-month-panel.invoice-mode .vendor-month-row {
+  grid-template-columns: minmax(210px, 1.45fr) minmax(62px, 0.35fr) repeat(3, minmax(120px, 0.75fr)) minmax(136px, 0.7fr);
+}
+
+.vendor-month-row.header {
+  border-top: 0;
+  background: rgba(212, 175, 55, 0.06);
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.vendor-month-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.vendor-month-row strong {
+  display: block;
+  color: #ffffff;
+}
+
+.vendor-month-row em {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.month-status {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 999px;
+  padding: 6px 9px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.month-status.ready {
+  background: rgba(119, 215, 167, 0.14);
+  color: var(--green);
+}
+
+.month-status.waiting {
+  background: rgba(212, 175, 55, 0.14);
+  color: var(--gold);
+}
+
+.vendor-month-row button:disabled {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.vendor-month-empty {
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  line-height: 1.55;
+  padding: 18px;
 }
 
 .table-panel,
@@ -992,7 +1057,8 @@ button:hover {
   .service-grid,
   .doc-grid,
   .task-grid,
-  .statement-numbers {
+  .statement-numbers,
+  .vendor-month-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1016,10 +1082,6 @@ button:hover {
   .job-grid,
   .statement-grid {
     grid-template-columns: 1fr;
-  }
-
-  .workflow-panel {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
 }
@@ -1060,9 +1122,19 @@ button:hover {
   .doc-grid,
   .task-grid,
   .statement-numbers,
-  .workflow-panel,
+  .vendor-month-summary,
+  .vendor-month-row,
+  .vendor-month-panel.invoice-mode .vendor-month-row,
   .drilldown-row {
     grid-template-columns: 1fr;
+  }
+
+  .vendor-month-row.header {
+    display: none;
+  }
+
+  .vendor-month-row {
+    gap: 8px;
   }
 
   .integration-strip {
