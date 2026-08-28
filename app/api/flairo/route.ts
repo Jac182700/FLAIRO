@@ -777,6 +777,42 @@ async function seedDatabase(db: D1Database) {
   ]);
 }
 
+type SupabaseLiveTableHealth = {
+  checkedAt: string;
+  databaseReady: boolean;
+};
+
+async function readSupabaseLiveTableHealth(): Promise<SupabaseLiveTableHealth | null> {
+  const runtimeEnv = env as unknown as Record<string, string | undefined>;
+  const supabaseUrl = runtimeEnv.NEXT_PUBLIC_SUPABASE_URL;
+  const supabasePublishableKey = runtimeEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
+  if (!supabaseUrl || !supabasePublishableKey) return null;
+
+  try {
+    const response = await fetch(`${supabaseUrl}/rest/v1/rpc/flairo_connection_ping`, {
+      method: 'POST',
+      headers: {
+        apikey: supabasePublishableKey,
+        Authorization: `Bearer ${supabasePublishableKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: '{}',
+    });
+
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as string;
+
+    return {
+      checkedAt: now(),
+      databaseReady: data === 'ok',
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function readState(db: D1Database) {
   const communityRows = await db.prepare('SELECT * FROM communities ORDER BY name').all();
   const serviceRows = await db.prepare('SELECT * FROM services ORDER BY category, name').all();
@@ -787,6 +823,8 @@ async function readState(db: D1Database) {
   const auditRows = await db.prepare('SELECT * FROM audit_events ORDER BY created_at DESC, id DESC LIMIT 20').all();
   const mobileSyncRow = await db.prepare('SELECT * FROM mobile_sync_state WHERE id = ?').bind('default').first<Record<string, unknown>>();
   const rewardSettingsRow = await db.prepare('SELECT * FROM reward_program_settings WHERE id = ?').bind('default').first<Record<string, unknown>>();
+  const liveTableHealth = await readSupabaseLiveTableHealth();
+  const pendingMobileChanges = Number(mobileSyncRow?.pending_changes ?? 0);
 
   return {
     audit: auditRows.results.map((row) => ({
@@ -913,11 +951,13 @@ async function readState(db: D1Database) {
       w9: String(row.w9_status),
     })),
     mobileSync: {
-      connectionStatus: String(mobileSyncRow?.connection_status ?? 'Live app bridge online'),
-      lastCheckedAt: labelDateTime(String(mobileSyncRow?.last_checked_at ?? now())),
+      connectionStatus: liveTableHealth?.databaseReady
+        ? `Supabase live tables online • ${pendingMobileChanges > 0 ? `${pendingMobileChanges} mobile changes staged` : 'mobile app current'}`
+        : String(mobileSyncRow?.connection_status ?? 'Live app bridge unavailable'),
+      lastCheckedAt: labelDateTime(liveTableHealth?.checkedAt ?? String(mobileSyncRow?.last_checked_at ?? now())),
       lastPushAt: mobileSyncRow?.last_push_at ? labelDateTime(String(mobileSyncRow.last_push_at)) : 'No mobile app push yet',
       lastPushSummary: String(mobileSyncRow?.last_push_summary ?? 'No mobile app push yet'),
-      pendingChanges: Number(mobileSyncRow?.pending_changes ?? 0),
+      pendingChanges: pendingMobileChanges,
       revision: Number(mobileSyncRow?.revision ?? 0),
     },
   };
