@@ -778,7 +778,6 @@ export default function ControlCenter({
 
   useEffect(() => {
     let active = true;
-    let timer: ReturnType<typeof setInterval> | undefined;
 
     const loadState = () => {
       fetch('/api/flairo')
@@ -803,11 +802,11 @@ export default function ControlCenter({
     };
 
     loadState();
-    timer = setInterval(loadState, 15000);
+    const timer = setInterval(loadState, 15000);
 
     return () => {
       active = false;
-      if (timer) clearInterval(timer);
+      clearInterval(timer);
     };
   }, []);
 
@@ -2450,7 +2449,8 @@ function RewardsModule({
   });
 
   useEffect(() => {
-    setSettingsDraft(rewardSettings);
+    const timer = setTimeout(() => setSettingsDraft(rewardSettings), 0);
+    return () => clearTimeout(timer);
   }, [rewardSettings]);
 
   const filteredRewards = useMemo(() => {
