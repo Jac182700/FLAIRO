@@ -339,11 +339,7 @@ export default function SupabaseAdminGate({
         </div>
 
         <p className="eyebrow gold">FLAIRO Admin</p>
-        <h1>Sign in to manage the Control Center.</h1>
-        <p>
-          This public page uses Supabase login before any resident, vendor, invoice,
-          or Plume Point controls are available.
-        </p>
+        <h1>Sign In</h1>
 
         {!hasSupabaseConfig && (
           <div className="admin-auth-alert">
@@ -380,7 +376,7 @@ export default function SupabaseAdminGate({
         </form>
 
         <p className="admin-auth-note">
-          Approved owner and admin profiles are managed in Supabase. Contact info@flairo.org if an account needs access.
+          Contact info@flairo.org if an account needs access.
         </p>
       </section>
     </main>
