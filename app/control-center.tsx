@@ -16,10 +16,25 @@ type ModuleId =
 type VendorStatus = 'Compliant' | 'Review needed' | 'Pending onboarding';
 type DocumentStatus = 'Verified' | 'Under review' | 'Needs upload' | 'Expiring';
 type VendorDocumentType = 'insurance' | 'license' | 'w9' | 'contract';
+type VendorMetricFilter = 'vendor-active' | 'vendor-review' | 'vendor-rating' | 'vendor-expiring';
 type BoardStatus = 'Open' | 'Claimed' | 'Scheduled' | 'Completed';
 type InvoiceStatus = 'Waiting' | 'Ready' | 'Draft queued' | 'Sent' | 'Paid' | 'Hold';
 type StatementStatus = 'Draft' | 'Ready' | 'Issued';
 type RewardStatus = 'Pending' | 'Available' | 'Redeemed' | 'Reversed' | 'Expired';
+
+type VendorComplianceDocument = {
+  id: string;
+  type: VendorDocumentType;
+  status: DocumentStatus;
+  storageKey: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  expiresAt: string | null;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  createdAt: string;
+};
 
 type Service = {
   id: string;
@@ -65,6 +80,7 @@ type Vendor = {
   contract: DocumentStatus;
   contractExpiresAt: string | null;
   documentCounts: Record<VendorDocumentType, number>;
+  documents: VendorComplianceDocument[];
   feePercent: number;
   pricingNotes: string;
   stage: string;
@@ -280,6 +296,13 @@ const navSections: Array<{ id: ModuleId; label: string }> = [
 
 const MINUTE_MS = 60 * 1000;
 const HOUR_MS = 60 * MINUTE_MS;
+const vendorDocumentLabels: Record<VendorDocumentType, string> = {
+  contract: 'FLAIRO contract',
+  insurance: 'Insurance',
+  license: 'Business license',
+  w9: 'W-9',
+};
+const vendorDocumentOrder: VendorDocumentType[] = ['insurance', 'license', 'w9', 'contract'];
 
 function relativeIso(hoursOffset: number) {
   return new Date(Date.now() + hoursOffset * HOUR_MS).toISOString();
@@ -410,6 +433,7 @@ const initialVendors: Vendor[] = [
     contract: 'Verified',
     contractExpiresAt: '2027-08-31',
     documentCounts: { contract: 1, insurance: 1, license: 1, w9: 1 },
+    documents: [],
     feePercent: 10,
     pricingNotes: 'Housekeeping priced by home size; vendor consults resident for recurring cadence.',
     stage: 'Board access active',
@@ -435,6 +459,7 @@ const initialVendors: Vendor[] = [
     contract: 'Verified',
     contractExpiresAt: '2026-10-15',
     documentCounts: { contract: 1, insurance: 1, license: 1, w9: 1 },
+    documents: [],
     feePercent: 10,
     pricingNotes: 'Resident pays vendor directly at visit completion.',
     stage: 'Insurance renewal review',
@@ -460,6 +485,7 @@ const initialVendors: Vendor[] = [
     contract: 'Under review',
     contractExpiresAt: '2027-01-31',
     documentCounts: { contract: 1, insurance: 1, license: 0, w9: 1 },
+    documents: [],
     feePercent: 10,
     pricingNotes: 'Moving estimates handled directly with resident after claim.',
     stage: 'License upload needed',
@@ -485,6 +511,7 @@ const initialVendors: Vendor[] = [
     contract: 'Verified',
     contractExpiresAt: '2027-05-31',
     documentCounts: { contract: 2, insurance: 1, license: 1, w9: 1 },
+    documents: [],
     feePercent: 10,
     pricingNotes: 'Admin may set a service price, otherwise vendor confirms project scope with resident.',
     stage: 'Board access active',
@@ -783,6 +810,22 @@ function localDateTime(value = new Date()) {
   });
 }
 
+function readFilePayload(file: File) {
+  return new Promise<Record<string, string | number>>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => {
+      resolve({
+        fileData: String(reader.result ?? ''),
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type || 'application/octet-stream',
+      });
+    });
+    reader.addEventListener('error', () => reject(reader.error ?? new Error('File could not be read')));
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function ControlCenter({
   authToken,
   onAccessRejected,
@@ -977,7 +1020,75 @@ export default function ControlCenter({
     void persistAction('toggle_service_visibility', { serviceId });
   };
 
-  const markDocumentUploaded = (vendorId: string, document: VendorDocumentType) => {
+  const markDocumentUploaded = (vendorId: string, document: VendorDocumentType, file?: File | null) => {
+    const documentLabels: Record<VendorDocumentType, string> = {
+      contract: 'FLAIRO contract',
+      insurance: 'Insurance',
+      license: 'Business license',
+      w9: 'W-9',
+    };
+    const createdAt = new Date().toISOString();
+
+    setVendors((current) =>
+      current.map((vendor) =>
+        vendor.id === vendorId
+          ? {
+              ...vendor,
+              [document]: 'Under review',
+              documentCounts: {
+                ...vendor.documentCounts,
+                [document]: (vendor.documentCounts[document] ?? 0) + 1,
+              },
+              documents: [
+                {
+                  createdAt,
+                  expiresAt: document === 'contract' ? vendor.contractExpiresAt : null,
+                  fileName: file?.name ?? `${documentLabels[document]} upload`,
+                  fileSize: file?.size ?? 0,
+                  fileType: file?.type ?? '',
+                  id: `local-${createdAt}-${document}`,
+                  reviewedAt: null,
+                  reviewedBy: null,
+                  status: 'Under review',
+                  storageKey: '',
+                  type: document,
+                },
+                ...vendor.documents,
+              ],
+              stage: `${documentLabels[document]} uploaded for review`,
+              status: 'Review needed',
+            }
+          : vendor,
+      ),
+    );
+    addAudit('Vendor document', `Compliance document uploaded for ${vendorName(vendorId, vendors)}.`);
+    void persistVendorDocumentUpload(vendorId, document, file ?? null);
+  };
+
+  const persistVendorDocumentUpload = async (vendorId: string, document: VendorDocumentType, file: File | null) => {
+    const filePayload = file ? await readFilePayload(file) : {};
+    await persistAction('upload_document', { documentType: document, vendorId, ...filePayload });
+  };
+
+  const openVendorDocument = async (documentId: string) => {
+    try {
+      const response = await fetch(`/api/flairo?documentId=${encodeURIComponent(documentId)}`, {
+        headers: authorizedHeaders,
+      });
+      if (response.status === 401 || response.status === 403) {
+        onAccessRejected?.();
+      }
+      if (!response.ok) throw new Error('Document unavailable');
+      const blob = await response.blob();
+      const documentUrl = window.URL.createObjectURL(blob);
+      window.open(documentUrl, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => window.URL.revokeObjectURL(documentUrl), 60000);
+    } catch {
+      setSyncStatus('Document record found, but the uploaded file is not available to open.');
+    }
+  };
+
+  const reviewVendorDocument = (vendorId: string, document: VendorDocumentType, status: DocumentStatus) => {
     const documentLabels: Record<VendorDocumentType, string> = {
       contract: 'FLAIRO contract',
       insurance: 'Insurance',
@@ -986,23 +1097,32 @@ export default function ControlCenter({
     };
 
     setVendors((current) =>
-      current.map((vendor) =>
-        vendor.id === vendorId
-          ? {
-              ...vendor,
-              [document]: vendor[document] === 'Verified' ? 'Verified' : 'Under review',
-              documentCounts: {
-                ...vendor.documentCounts,
-                [document]: (vendor.documentCounts[document] ?? 0) + 1,
-              },
-              stage: `${documentLabels[document]} uploaded for review`,
-              status: vendor.status === 'Compliant' ? 'Compliant' : 'Review needed',
-            }
-          : vendor,
-      ),
+      current.map((vendor) => {
+        if (vendor.id !== vendorId) return vendor;
+        const updated = {
+          ...vendor,
+          [document]: status,
+          documents: vendor.documents.map((item) =>
+            item.type === document
+              ? {
+                  ...item,
+                  reviewedAt: new Date().toISOString(),
+                  reviewedBy: 'FLAIRO ADMIN',
+                  status,
+                }
+              : item,
+          ),
+          stage: `${documentLabels[document]} marked ${status}`,
+        };
+        const coreDocuments: DocumentStatus[] = [updated.insurance, updated.license, updated.w9, updated.contract];
+        return {
+          ...updated,
+          status: coreDocuments.every((item) => item === 'Verified') ? 'Compliant' : 'Review needed',
+        };
+      }),
     );
-    addAudit('Vendor document', `Compliance document uploaded for ${vendorName(vendorId, vendors)}.`);
-    void persistAction('upload_document', { documentType: document, vendorId });
+    addAudit('Document review', `${documentLabels[document]} marked ${status} for ${vendorName(vendorId, vendors)}.`);
+    void persistAction('review_document', { documentType: document, status, vendorId });
   };
 
   const saveVendorProfile = (draft: VendorFormDraft) => {
@@ -1032,6 +1152,7 @@ export default function ControlCenter({
         ...documentCounts,
         contract: draft.contractUploadQueued ? documentCounts.contract + 1 : documentCounts.contract,
       },
+      documents: existingVendor?.documents ?? [],
       email,
       feePercent,
       id: vendorId,
@@ -1717,7 +1838,10 @@ export default function ControlCenter({
           <VendorsModule
             approveVendor={approveVendor}
             highlightRecordId={activeModule === 'vendors' ? focusTarget?.recordId : null}
+            jobs={jobs}
             markDocumentUploaded={markDocumentUploaded}
+            openVendorDocument={openVendorDocument}
+            reviewVendorDocument={reviewVendorDocument}
             saveVendorProfile={saveVendorProfile}
             services={services}
             vendors={vendors}
@@ -2165,19 +2289,28 @@ function MobileControlsModule({
 function VendorsModule({
   approveVendor,
   highlightRecordId,
+  jobs,
   markDocumentUploaded,
+  openVendorDocument,
+  reviewVendorDocument,
   saveVendorProfile,
   services,
   vendors,
 }: {
   approveVendor: (vendorId: string) => void;
   highlightRecordId?: string | null;
-  markDocumentUploaded: (vendorId: string, document: VendorDocumentType) => void;
+  jobs: Job[];
+  markDocumentUploaded: (vendorId: string, document: VendorDocumentType, file?: File | null) => void;
+  openVendorDocument: (documentId: string) => Promise<void>;
+  reviewVendorDocument: (vendorId: string, document: VendorDocumentType, status: DocumentStatus) => void;
   saveVendorProfile: (draft: VendorFormDraft) => boolean;
   services: Service[];
   vendors: Vendor[];
 }) {
   const [vendorDialog, setVendorDialog] = useState<{ mode: 'add' | 'edit'; draft: VendorFormDraft } | null>(null);
+  const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
+  const [profileDraft, setProfileDraft] = useState<VendorFormDraft | null>(null);
+  const [activeVendorMetric, setActiveVendorMetric] = useState<VendorMetricFilter>('vendor-active');
 
   const updateVendorDraft = <K extends keyof VendorFormDraft>(field: K, value: VendorFormDraft[K]) => {
     setVendorDialog((current) =>
@@ -2209,36 +2342,120 @@ function VendorsModule({
     });
   };
 
+  const updateProfileDraft = <K extends keyof VendorFormDraft>(field: K, value: VendorFormDraft[K]) => {
+    setProfileDraft((current) =>
+      current
+        ? {
+            ...current,
+            [field]: value,
+          }
+        : current,
+    );
+  };
+
+  const toggleProfileService = (serviceName: string) => {
+    setProfileDraft((current) => {
+      if (!current) return current;
+      const servicesForVendor = current.services.includes(serviceName)
+        ? current.services.filter((service) => service !== serviceName)
+        : [...current.services, serviceName];
+      return {
+        ...current,
+        services: servicesForVendor,
+      };
+    });
+  };
+
+  const openVendorProfile = (vendor: Vendor) => {
+    setSelectedVendorId(vendor.id);
+    setProfileDraft(vendorToDraft(vendor));
+  };
+
   const submitVendorProfile = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (vendorDialog && saveVendorProfile(vendorDialog.draft)) setVendorDialog(null);
   };
 
+  const submitProfilePage = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (profileDraft && saveVendorProfile(profileDraft)) {
+      setProfileDraft({
+        ...profileDraft,
+        contractUploadQueued: false,
+      });
+    }
+  };
+
+  const averageVendorRating = averageRating(vendors);
+  const expiringVendors = vendors.filter(vendorHasExpiringUpdate);
+  const vendorMetrics: Metric[] = [
+    {
+      detail: 'Can claim work now',
+      id: 'vendor-active',
+      label: 'Active vendor pool',
+      value: String(vendors.filter((vendor) => vendor.boardAccess).length),
+    },
+    {
+      detail: 'Needs document or approval',
+      id: 'vendor-review',
+      label: 'Compliance review',
+      value: String(vendors.filter((vendor) => vendor.status !== 'Compliant').length),
+    },
+    {
+      detail: 'All vendors blended satisfaction',
+      id: 'vendor-rating',
+      label: 'Avg. vendor rating',
+      value: averageVendorRating.toFixed(1),
+    },
+    {
+      detail: 'Contracts or insurance in next 60 days',
+      id: 'vendor-expiring',
+      label: 'Vendor updates due',
+      value: String(expiringVendors.length),
+    },
+  ];
+
+  const filteredVendors = vendors
+    .filter((vendor) => {
+      if (activeVendorMetric === 'vendor-active') return vendor.boardAccess;
+      if (activeVendorMetric === 'vendor-review') return vendor.status !== 'Compliant';
+      if (activeVendorMetric === 'vendor-expiring') return vendorHasExpiringUpdate(vendor);
+      return true;
+    })
+    .sort((a, b) => {
+      if (activeVendorMetric === 'vendor-rating') return b.rating - a.rating;
+      return a.name.localeCompare(b.name);
+    });
+  const activeVendorMetricLabel = vendorMetrics.find((metric) => metric.id === activeVendorMetric)?.label ?? 'Vendors';
+  const selectedVendor = selectedVendorId ? vendors.find((vendor) => vendor.id === selectedVendorId) ?? null : null;
+
+  if (selectedVendor && profileDraft) {
+    return (
+      <VendorProfilePage
+        draft={profileDraft}
+        jobs={jobs}
+        markDocumentUploaded={markDocumentUploaded}
+        onBack={() => {
+          setSelectedVendorId(null);
+          setProfileDraft(null);
+        }}
+        onOpenDocument={openVendorDocument}
+        onReviewDocument={reviewVendorDocument}
+        onSave={submitProfilePage}
+        onToggleService={toggleProfileService}
+        onUpdateDraft={updateProfileDraft}
+        services={services}
+        vendor={selectedVendor}
+      />
+    );
+  }
+
   return (
     <>
       <MetricGrid
-        metrics={[
-          {
-            label: 'Active vendor pool',
-            value: String(vendors.filter((vendor) => vendor.boardAccess).length),
-            detail: 'Can claim work now',
-          },
-          {
-            label: 'Compliance review',
-            value: String(vendors.filter((vendor) => vendor.status !== 'Compliant').length),
-            detail: 'Needs document or approval',
-          },
-          {
-            label: 'Avg. vendor rating',
-            value: '4.7',
-            detail: 'From completed FLAIRO jobs',
-          },
-          {
-            label: 'Vendor-specific fees',
-            value: 'Per vendor',
-            detail: 'Agreed FLAIRO share lives on each profile',
-          },
-        ]}
+        activeMetricId={activeVendorMetric}
+        metrics={vendorMetrics}
+        onSelectMetric={(metricId) => setActiveVendorMetric(metricId as VendorMetricFilter)}
       />
 
       <section className="table-panel">
@@ -2246,6 +2463,7 @@ function VendorsModule({
           <div>
             <p className="eyebrow">Vendor CRM and compliance</p>
             <h2>Onboarding, documents, and job-board access</h2>
+            <p className="section-subtitle">Showing {filteredVendors.length} in {activeVendorMetricLabel}</p>
           </div>
           <div className="section-actions">
             <button type="button" onClick={() => setVendorDialog({ mode: 'add', draft: blankVendorDraft() })}>
@@ -2255,7 +2473,7 @@ function VendorsModule({
           </div>
         </div>
         <div className="vendor-list">
-          {vendors.map((vendor) => (
+          {filteredVendors.map((vendor) => (
             <article
               className={`vendor-card${highlightRecordId === `vendor-${vendor.id}` ? ' record-highlight' : ''}`}
               data-record-id={`vendor-${vendor.id}`}
@@ -2274,7 +2492,7 @@ function VendorsModule({
                   <strong>{vendor.boardAccess ? 'Board access on' : 'No board access'}</strong>
                   <button
                     className="secondary-action"
-                    onClick={() => setVendorDialog({ mode: 'edit', draft: vendorToDraft(vendor) })}
+                    onClick={() => openVendorProfile(vendor)}
                     type="button"
                   >
                     Edit vendor
@@ -2286,7 +2504,7 @@ function VendorsModule({
                 <span>{vendor.markets.join(', ')}</span>
                 <span>{vendor.services.join(', ')}</span>
                 <span>FLAIRO fee {vendor.feePercent}%</span>
-                <span>Rating {vendor.rating.toFixed(1)}</span>
+                <span className="vendor-rating-pill">Vendor rating {vendor.rating.toFixed(1)}</span>
               </div>
 
               <div className="vendor-profile-grid">
@@ -2324,7 +2542,7 @@ function VendorsModule({
                 <label className="file-upload">
                   <input
                     accept=".pdf,.png,.jpg,.jpeg"
-                    onChange={() => markDocumentUploaded(vendor.id, 'insurance')}
+                    onChange={(event) => markDocumentUploaded(vendor.id, 'insurance', event.target.files?.[0] ?? null)}
                     type="file"
                   />
                   Upload insurance
@@ -2332,7 +2550,7 @@ function VendorsModule({
                 <label className="file-upload secondary">
                   <input
                     accept=".pdf,.png,.jpg,.jpeg"
-                    onChange={() => markDocumentUploaded(vendor.id, 'license')}
+                    onChange={(event) => markDocumentUploaded(vendor.id, 'license', event.target.files?.[0] ?? null)}
                     type="file"
                   />
                   Upload license
@@ -2340,7 +2558,7 @@ function VendorsModule({
                 <label className="file-upload">
                   <input
                     accept=".pdf,.png,.jpg,.jpeg"
-                    onChange={() => markDocumentUploaded(vendor.id, 'w9')}
+                    onChange={(event) => markDocumentUploaded(vendor.id, 'w9', event.target.files?.[0] ?? null)}
                     type="file"
                   />
                   Upload W-9
@@ -2348,7 +2566,7 @@ function VendorsModule({
                 <label className="file-upload secondary">
                   <input
                     accept=".pdf,.png,.jpg,.jpeg"
-                    onChange={() => markDocumentUploaded(vendor.id, 'contract')}
+                    onChange={(event) => markDocumentUploaded(vendor.id, 'contract', event.target.files?.[0] ?? null)}
                     type="file"
                   />
                   Upload contract
@@ -2523,6 +2741,349 @@ function VendorsModule({
         </div>
       )}
     </>
+  );
+}
+
+function VendorProfilePage({
+  draft,
+  jobs,
+  markDocumentUploaded,
+  onBack,
+  onOpenDocument,
+  onReviewDocument,
+  onSave,
+  onToggleService,
+  onUpdateDraft,
+  services,
+  vendor,
+}: {
+  draft: VendorFormDraft;
+  jobs: Job[];
+  markDocumentUploaded: (vendorId: string, document: VendorDocumentType, file?: File | null) => void;
+  onBack: () => void;
+  onOpenDocument: (documentId: string) => Promise<void>;
+  onReviewDocument: (vendorId: string, document: VendorDocumentType, status: DocumentStatus) => void;
+  onSave: (event: FormEvent<HTMLFormElement>) => void;
+  onToggleService: (serviceName: string) => void;
+  onUpdateDraft: <K extends keyof VendorFormDraft>(field: K, value: VendorFormDraft[K]) => void;
+  services: Service[];
+  vendor: Vendor;
+}) {
+  const [historySearch, setHistorySearch] = useState('');
+  const vendorJobs = useMemo(
+    () => jobs.filter((job) => job.vendorId === vendor.id).sort((a, b) => Date.parse(b.requestedAt) - Date.parse(a.requestedAt)),
+    [jobs, vendor.id],
+  );
+  const currentMonth = todayInputDate().slice(0, 7);
+  const currentMonthJobs = vendorJobs.filter((job) => job.serviceDate.startsWith(currentMonth));
+  const openPaymentJobs = vendorJobs.filter((job) => !job.vendorPaymentConfirmed || !job.residentPaymentConfirmed);
+  const readyInvoiceJobs = vendorJobs.filter((job) => job.invoiceStatus === 'Ready' || job.invoiceStatus === 'Draft queued');
+  const filteredJobs = vendorJobs.filter((job) => {
+    const search = historySearch.trim().toLowerCase();
+    if (!search) return true;
+    return [
+      job.id,
+      job.resident,
+      job.service,
+      job.market,
+      job.unit,
+      job.boardStatus,
+      job.invoiceStatus,
+      paymentSummary(job),
+    ].join(' ').toLowerCase().includes(search);
+  });
+  const documentTypes = vendorDocumentOrder;
+
+  return (
+    <section className="vendor-profile-page">
+      <section className="table-panel vendor-profile-hero">
+        <div className="profile-heading">
+          <div>
+            <p className="eyebrow">Vendor profile</p>
+            <h2 className={`vendor-name ${vendorVisibilityClass(vendor)}`}>{vendor.name}</h2>
+            <p>{vendor.contact} / {vendor.email} / {vendor.phone}</p>
+          </div>
+          <div className="section-actions">
+            <button className="secondary-action" onClick={onBack} type="button">
+              Back to vendors
+            </button>
+            <button form="vendor-profile-form" type="submit">
+              Save profile
+            </button>
+          </div>
+        </div>
+        <div className="profile-summary-grid">
+          <InfoTile label="Board status" value={vendor.boardAccess ? 'Board access on' : 'No board access'} />
+          <InfoTile label="Vendor rating" value={vendor.rating ? vendor.rating.toFixed(1) : 'No rating yet'} />
+          <InfoTile label="This month" value={`${currentMonthJobs.length} job${currentMonthJobs.length === 1 ? '' : 's'}`} />
+          <InfoTile label="Resident total" value={dollars(currentMonthJobs.reduce((sum, job) => sum + job.amount, 0))} />
+          <InfoTile label="FLAIRO payout" value={dollars(currentMonthJobs.reduce((sum, job) => sum + job.flairoFee, 0))} />
+          <InfoTile label="Payment checks" value={`${openPaymentJobs.length} open`} />
+          <InfoTile label="Invoice queue" value={`${readyInvoiceJobs.length} ready`} />
+          <InfoTile label="Documents" value={`${documentTotal(vendor)} saved`} />
+        </div>
+      </section>
+
+      <form className="table-panel vendor-profile-form" id="vendor-profile-form" onSubmit={onSave}>
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Profile controls</p>
+            <h2>Vendor details and eligibility</h2>
+          </div>
+        </div>
+
+        <div className="form-grid three">
+          <label>
+            Vendor name
+            <input
+              onChange={(event: ChangeEvent<HTMLInputElement>) => onUpdateDraft('name', event.target.value)}
+              required
+              value={draft.name}
+            />
+          </label>
+          <label>
+            DBA name
+            <input
+              onChange={(event: ChangeEvent<HTMLInputElement>) => onUpdateDraft('dbaName', event.target.value)}
+              value={draft.dbaName}
+            />
+          </label>
+          <label>
+            Point of contact
+            <input
+              onChange={(event: ChangeEvent<HTMLInputElement>) => onUpdateDraft('contact', event.target.value)}
+              required
+              value={draft.contact}
+            />
+          </label>
+          <label>
+            Email
+            <input
+              onChange={(event: ChangeEvent<HTMLInputElement>) => onUpdateDraft('email', event.target.value)}
+              required
+              type="email"
+              value={draft.email}
+            />
+          </label>
+          <label>
+            Phone
+            <input
+              onChange={(event: ChangeEvent<HTMLInputElement>) => onUpdateDraft('phone', event.target.value)}
+              required
+              value={draft.phone}
+            />
+          </label>
+          <label>
+            FLAIRO fee %
+            <input
+              min="0"
+              onChange={(event: ChangeEvent<HTMLInputElement>) => onUpdateDraft('feePercent', event.target.value)}
+              step="0.25"
+              type="number"
+              value={draft.feePercent}
+            />
+          </label>
+        </div>
+
+        <div className="form-grid two">
+          <label>
+            Physical address
+            <textarea
+              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => onUpdateDraft('physicalAddress', event.target.value)}
+              rows={3}
+              value={draft.physicalAddress}
+            />
+          </label>
+          <label>
+            Service areas, cities, ZIPs
+            <textarea
+              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => onUpdateDraft('serviceLocations', event.target.value)}
+              rows={3}
+              value={draft.serviceLocations}
+            />
+          </label>
+        </div>
+
+        <fieldset className="service-check-grid">
+          <legend>Eligible services</legend>
+          {services.map((service) => (
+            <label className="check-control" key={service.id}>
+              <input
+                checked={draft.services.includes(service.name)}
+                onChange={() => onToggleService(service.name)}
+                type="checkbox"
+              />
+              <span>{service.name}</span>
+            </label>
+          ))}
+        </fieldset>
+
+        <div className="form-grid two">
+          <label>
+            Service pricing
+            <textarea
+              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => onUpdateDraft('pricingNotes', event.target.value)}
+              rows={3}
+              value={draft.pricingNotes}
+            />
+          </label>
+          <label>
+            Contract expiration
+            <input
+              onChange={(event: ChangeEvent<HTMLInputElement>) => onUpdateDraft('contractExpiresAt', event.target.value)}
+              type="date"
+              value={draft.contractExpiresAt}
+            />
+          </label>
+        </div>
+
+        <div className="vendor-modal-controls">
+          <label className="check-control">
+            <input
+              checked={draft.boardAccess}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => onUpdateDraft('boardAccess', event.target.checked)}
+              type="checkbox"
+            />
+            <span>Board access</span>
+          </label>
+          <label className="check-control">
+            <input
+              checked={draft.preferred}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => onUpdateDraft('preferred', event.target.checked)}
+              type="checkbox"
+            />
+            <span>Preferred vendor</span>
+          </label>
+          <label className="file-upload secondary inline-upload">
+            <input
+              accept=".pdf,.png,.jpg,.jpeg"
+              onChange={(event) => {
+                onUpdateDraft('contractUploadQueued', true);
+                markDocumentUploaded(vendor.id, 'contract', event.target.files?.[0] ?? null);
+              }}
+              type="file"
+            />
+            {draft.contractUploadQueued ? 'Contract selected' : 'Upload contract'}
+          </label>
+        </div>
+      </form>
+
+      <section className="table-panel document-workflow-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Compliance documents</p>
+            <h2>Review and approval workflow</h2>
+          </div>
+        </div>
+        <div className="document-workflow-list">
+          {documentTypes.map((documentType) => {
+            const documents = vendor.documents
+              .filter((document) => document.type === documentType)
+              .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+            const latestDocument = documents[0];
+            const status = vendor[documentType];
+
+            return (
+              <article className="document-workflow-card" key={documentType}>
+                <div className="document-workflow-head">
+                  <div>
+                    <h3>{vendorDocumentLabels[documentType]}</h3>
+                    <p>{documents.length ? `${documents.length} saved on this vendor profile` : 'No document saved yet'}</p>
+                  </div>
+                  <strong className={status === 'Verified' ? 'good-text' : 'review-text'}>{status}</strong>
+                </div>
+                {latestDocument && (
+                  <div className="document-latest">
+                    <span>Latest upload</span>
+                    <strong>{latestDocument.fileName || 'Compliance document'}</strong>
+                    <em>
+                      {labelDateTimeShort(latestDocument.createdAt)}
+                      {latestDocument.fileSize ? ` / ${formatFileSize(latestDocument.fileSize)}` : ''}
+                    </em>
+                  </div>
+                )}
+                <div className="document-actions">
+                  <label className="file-upload">
+                    <input
+                      accept=".pdf,.png,.jpg,.jpeg"
+                      onChange={(event) => markDocumentUploaded(vendor.id, documentType, event.target.files?.[0] ?? null)}
+                      type="file"
+                    />
+                    Upload new
+                  </label>
+                  <button
+                    className="secondary-action"
+                    disabled={!latestDocument || latestDocument.id.startsWith('local-')}
+                    onClick={() => latestDocument && void onOpenDocument(latestDocument.id)}
+                    type="button"
+                  >
+                    Open latest
+                  </button>
+                  <button onClick={() => onReviewDocument(vendor.id, documentType, 'Verified')} type="button">
+                    Approve
+                  </button>
+                  <button className="secondary-action" onClick={() => onReviewDocument(vendor.id, documentType, 'Expiring')} type="button">
+                    Mark expiring
+                  </button>
+                  <button className="danger-action" onClick={() => onReviewDocument(vendor.id, documentType, 'Needs upload')} type="button">
+                    Request update
+                  </button>
+                </div>
+                {documents.length > 0 && (
+                  <div className="document-archive">
+                    {documents.slice(0, 4).map((document) => (
+                      <div className="document-archive-row" key={document.id}>
+                        <span>{document.fileName || 'Compliance document'}</span>
+                        <strong className={document.status === 'Verified' ? 'good-text' : 'review-text'}>{document.status}</strong>
+                        <em>{labelDateTimeShort(document.createdAt)}</em>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="table-panel vendor-history-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Vendor job history</p>
+            <h2>{vendor.name} work ledger</h2>
+          </div>
+          <label className="compact-search">
+            Search
+            <input
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setHistorySearch(event.target.value)}
+              placeholder="Job, resident, service, status"
+              value={historySearch}
+            />
+          </label>
+        </div>
+        <div className="vendor-history-list">
+          {filteredJobs.length === 0 && (
+            <p className="table-empty">No job history matches this vendor view yet.</p>
+          )}
+          {filteredJobs.map((job) => (
+            <article className="vendor-history-card" key={job.id}>
+              <div>
+                <span className={job.boardStatus === 'Completed' ? 'status good' : 'status review'}>{job.boardStatus}</span>
+                <h3>{job.id} / {job.service}</h3>
+                <p>{job.resident} / {job.market} / Unit {job.unit}</p>
+              </div>
+              <div className="vendor-history-facts">
+                <InfoTile label="Service date" value={job.serviceDate || 'Not scheduled'} />
+                <InfoTile label="Resident total" value={dollars(job.amount)} />
+                <InfoTile label="FLAIRO payout" value={dollars(job.flairoFee)} />
+                <InfoTile label="Payment" value={paymentSummary(job)} />
+                <InfoTile label="Invoice" value={job.invoiceStatus} />
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+    </section>
   );
 }
 
@@ -3847,6 +4408,31 @@ function documentTotal(vendor: Vendor) {
   return Object.values(vendor.documentCounts).reduce((sum, count) => sum + count, 0);
 }
 
+function averageRating(vendors: Vendor[]) {
+  const ratedVendors = vendors.filter((vendor) => vendor.rating > 0);
+  if (!ratedVendors.length) return 0;
+  return ratedVendors.reduce((sum, vendor) => sum + vendor.rating, 0) / ratedVendors.length;
+}
+
+function vendorHasExpiringUpdate(vendor: Vendor) {
+  return vendor.insurance === 'Expiring' ||
+    vendor.contract === 'Expiring' ||
+    dateWithinDays(vendor.contractExpiresAt, 60) ||
+    vendor.documents.some(
+      (document) =>
+        (document.type === 'insurance' || document.type === 'contract') &&
+        (document.status === 'Expiring' || dateWithinDays(document.expiresAt, 60)),
+    );
+}
+
+function dateWithinDays(value: string | null, days: number) {
+  if (!value) return false;
+  const timestamp = Date.parse(value.includes('T') ? value : `${value}T00:00:00`);
+  if (Number.isNaN(timestamp)) return false;
+  const diff = timestamp - Date.now();
+  return diff >= 0 && diff <= days * 24 * HOUR_MS;
+}
+
 function labelInputDate(value: string) {
   const [year, month, day] = value.split('-').map(Number);
   if (!year || !month || !day) return value;
@@ -3855,6 +4441,13 @@ function labelInputDate(value: string) {
     month: 'short',
     year: 'numeric',
   });
+}
+
+function formatFileSize(bytes: number) {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function vendorIdFromName(name: string) {

@@ -34,6 +34,7 @@ type VendorSeed = {
   contact: string;
   email: string;
   phone: string;
+  physicalAddress: string;
   markets: string[];
   serviceLocations: string[];
   services: string[];
@@ -261,6 +262,7 @@ const vendors: VendorSeed[] = [
     contact: 'Elena Martinez',
     email: 'operations@sparklesettle.example',
     phone: '(305) 555-0181',
+    physicalAddress: '420 Las Olas Blvd, Fort Lauderdale, FL 33301',
     markets: ['Fort Lauderdale, FL', 'Sunrise, FL'],
     serviceLocations: ['33301', '33304', '33322', 'Sunrise, FL'],
     services: ['Recurring housekeeping', 'Move-out deep cleaning'],
@@ -284,6 +286,7 @@ const vendors: VendorSeed[] = [
     contact: 'Jordan Ellis',
     email: 'hello@pinkpalmpet.example',
     phone: '(954) 555-0174',
+    physicalAddress: '1120 NE 4th Ave, Fort Lauderdale, FL 33304',
     markets: ['Fort Lauderdale, FL'],
     serviceLocations: ['33301', '33304', '33305'],
     services: ['Dog walking and drop-ins'],
@@ -307,6 +310,7 @@ const vendors: VendorSeed[] = [
     contact: 'Andre Collins',
     email: 'dispatch@porterpreferred.example',
     phone: '(786) 555-0142',
+    physicalAddress: '9900 NW 21st St, Doral, FL 33172',
     markets: ['Miami, FL', 'Sunrise, FL'],
     serviceLocations: ['33132', '33137', '33323', '33351'],
     services: ['Preferred movers'],
@@ -330,6 +334,7 @@ const vendors: VendorSeed[] = [
     contact: 'Nina Patel',
     email: 'jobs@hexkeyhome.example',
     phone: '(561) 555-0126',
+    physicalAddress: '7800 Biscayne Blvd, Miami, FL 33138',
     markets: ['Miami, FL', 'Fort Lauderdale, FL'],
     serviceLocations: ['33138', '33137', '33301', '33308'],
     services: ['Handyman work', 'Move-out touch-up painting'],
@@ -592,6 +597,8 @@ type SupabaseAuthUser = {
   email?: string;
 };
 
+type ActionPayload = Record<string, string | number | boolean | null>;
+
 const adminRoles = new Set(['owner', 'admin', 'operations']);
 
 function runtimeSupabaseConfig() {
@@ -711,6 +718,10 @@ export async function GET(request: Request) {
 
     await initializeDatabase(env.DB);
     await seedDatabase(env.DB);
+    const documentId = new URL(request.url).searchParams.get('documentId');
+    if (documentId) {
+      return await downloadVendorDocument(documentId);
+    }
     await touchMobileConnection(env.DB);
     return Response.json(await readState(env.DB));
   } catch (error) {
@@ -725,7 +736,7 @@ export async function POST(request: Request) {
 
     await initializeDatabase(env.DB);
     await seedDatabase(env.DB);
-    const body = await request.json() as { action?: string; payload?: Record<string, string | number | boolean | null> };
+    const body = await request.json() as { action?: string; payload?: ActionPayload };
     const payload = body.payload ?? {};
     let stageMobileChange = false;
 
@@ -738,7 +749,11 @@ export async function POST(request: Request) {
         stageMobileChange = true;
         break;
       case 'upload_document':
-        await recordDocumentUpload(textPayload(payload, 'vendorId'), textPayload(payload, 'documentType'));
+        await recordDocumentUpload(payload);
+        stageMobileChange = true;
+        break;
+      case 'review_document':
+        await reviewVendorDocument(textPayload(payload, 'vendorId'), textPayload(payload, 'documentType'), textPayload(payload, 'status'));
         stageMobileChange = true;
         break;
       case 'upsert_vendor':
@@ -835,7 +850,7 @@ async function initializeDatabase(db: D1Database) {
     db.prepare('CREATE TABLE IF NOT EXISTS communities (id TEXT PRIMARY KEY, name TEXT NOT NULL, market TEXT NOT NULL, address TEXT NOT NULL, property_manager TEXT NOT NULL, homes INTEGER NOT NULL, occupied_homes INTEGER NOT NULL, plus_enabled INTEGER NOT NULL DEFAULT 0, plus_members INTEGER NOT NULL DEFAULT 0, service_penetration REAL NOT NULL DEFAULT 0, net_income_cents INTEGER NOT NULL DEFAULT 0, statement_status TEXT NOT NULL DEFAULT "Draft", created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS services (id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, mobile_visible INTEGER NOT NULL DEFAULT 1, standard_price_cents INTEGER NOT NULL, plus_price_cents INTEGER NOT NULL, points_rule TEXT NOT NULL, vendor_pool_rule TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS vendors (id TEXT PRIMARY KEY, business_name TEXT NOT NULL, dba_name TEXT NOT NULL DEFAULT "", primary_contact TEXT NOT NULL, email TEXT NOT NULL, phone TEXT NOT NULL, physical_address TEXT NOT NULL DEFAULT "", markets TEXT NOT NULL, service_locations TEXT NOT NULL DEFAULT "[]", services TEXT NOT NULL, pricing_notes TEXT NOT NULL DEFAULT "", onboarding_stage TEXT NOT NULL, compliance_status TEXT NOT NULL, board_access INTEGER NOT NULL DEFAULT 0, preferred_vendor INTEGER NOT NULL DEFAULT 0, insurance_status TEXT NOT NULL DEFAULT "Needs upload", license_status TEXT NOT NULL DEFAULT "Needs upload", w9_status TEXT NOT NULL DEFAULT "Needs upload", contract_status TEXT NOT NULL DEFAULT "Needs upload", contract_expires_at TEXT, flairo_fee_percent REAL NOT NULL DEFAULT 10, rating REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
-    db.prepare('CREATE TABLE IF NOT EXISTS vendor_documents (id TEXT PRIMARY KEY, vendor_id TEXT NOT NULL, document_type TEXT NOT NULL, status TEXT NOT NULL, storage_key TEXT, expires_at TEXT, reviewed_by TEXT, reviewed_at TEXT, created_at TEXT NOT NULL)'),
+    db.prepare('CREATE TABLE IF NOT EXISTS vendor_documents (id TEXT PRIMARY KEY, vendor_id TEXT NOT NULL, document_type TEXT NOT NULL, status TEXT NOT NULL, storage_key TEXT, file_name TEXT, file_type TEXT, file_size INTEGER NOT NULL DEFAULT 0, expires_at TEXT, reviewed_by TEXT, reviewed_at TEXT, created_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS resident_requests (id TEXT PRIMARY KEY, resident_name TEXT NOT NULL, resident_email TEXT NOT NULL, resident_phone TEXT NOT NULL, community_id TEXT NOT NULL, market TEXT NOT NULL, unit TEXT NOT NULL, home_profile TEXT NOT NULL, service_name TEXT NOT NULL, preferred_window TEXT NOT NULL, board_status TEXT NOT NULL, visible_to_vendors INTEGER NOT NULL DEFAULT 1, resident_info_released INTEGER NOT NULL DEFAULT 0, requested_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS job_orders (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, vendor_id TEXT, task_status TEXT NOT NULL, service_date TEXT, schedule_confirmed_at TEXT, vendor_confirmed_at TEXT, claimed_at TEXT, schedule_due_at TEXT, payment_consult_status TEXT NOT NULL DEFAULT "Not started", resident_paid_vendor INTEGER NOT NULL DEFAULT 0, vendor_payment_confirmed INTEGER NOT NULL DEFAULT 0, resident_payment_confirmed INTEGER NOT NULL DEFAULT 0, amount_paid_cents INTEGER, payment_date TEXT, receipt_number TEXT, payment_inquiry_status TEXT, service_amount_cents INTEGER NOT NULL, flairo_fee_cents INTEGER NOT NULL, points INTEGER NOT NULL DEFAULT 0, invoice_trigger_status TEXT NOT NULL DEFAULT "Waiting", created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS reward_ledger_entries (id TEXT PRIMARY KEY, resident_name TEXT NOT NULL, community_id TEXT NOT NULL, request_id TEXT, entry_type TEXT NOT NULL, status TEXT NOT NULL, points INTEGER NOT NULL, dollar_value_cents INTEGER NOT NULL DEFAULT 0, expires_at TEXT, plus_member INTEGER NOT NULL DEFAULT 1, alert_queued INTEGER NOT NULL DEFAULT 0, redeemed_in_expiration_window INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL, created_at TEXT NOT NULL)'),
@@ -848,6 +863,7 @@ async function initializeDatabase(db: D1Database) {
     db.prepare('CREATE INDEX IF NOT EXISTS idx_requests_board ON resident_requests (board_status, visible_to_vendors)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_jobs_invoice ON job_orders (invoice_trigger_status)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_vendors_access ON vendors (board_access, compliance_status)'),
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_vendor_documents_vendor ON vendor_documents (vendor_id, document_type, created_at)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_rewards_status ON reward_ledger_entries (status)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_reward_program_settings_updated_at ON reward_program_settings (updated_at)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_mobile_sync_updated_at ON mobile_sync_state (updated_at)'),
@@ -861,6 +877,9 @@ async function initializeDatabase(db: D1Database) {
   await ensureColumn(db, 'vendors', 'contract_status', 'TEXT NOT NULL DEFAULT "Needs upload"');
   await ensureColumn(db, 'vendors', 'contract_expires_at', 'TEXT');
   await ensureColumn(db, 'vendors', 'preferred_vendor', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(db, 'vendor_documents', 'file_name', 'TEXT');
+  await ensureColumn(db, 'vendor_documents', 'file_type', 'TEXT');
+  await ensureColumn(db, 'vendor_documents', 'file_size', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'job_orders', 'vendor_payment_confirmed', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'job_orders', 'resident_payment_confirmed', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'job_orders', 'amount_paid_cents', 'INTEGER');
@@ -981,7 +1000,7 @@ async function readState(db: D1Database) {
   const communityRows = await db.prepare('SELECT * FROM communities ORDER BY name').all();
   const serviceRows = await db.prepare('SELECT * FROM services ORDER BY category, name').all();
   const vendorRows = await db.prepare('SELECT * FROM vendors ORDER BY business_name').all();
-  const vendorDocumentRows = await db.prepare('SELECT vendor_id, document_type, COUNT(*) as count FROM vendor_documents GROUP BY vendor_id, document_type').all();
+  const vendorDocumentRows = await db.prepare('SELECT * FROM vendor_documents ORDER BY created_at DESC, id DESC').all();
   const jobRows = await db.prepare('SELECT r.*, j.vendor_id, j.task_status, j.service_date, j.schedule_confirmed_at, j.vendor_confirmed_at, j.claimed_at, j.schedule_due_at, j.payment_consult_status, j.resident_paid_vendor, j.vendor_payment_confirmed, j.resident_payment_confirmed, j.amount_paid_cents, j.payment_date, j.receipt_number, j.payment_inquiry_status, j.service_amount_cents, j.flairo_fee_cents, j.points, j.invoice_trigger_status FROM resident_requests r JOIN job_orders j ON j.request_id = r.id ORDER BY r.id DESC').all();
   const rewardRows = await db.prepare('SELECT * FROM reward_ledger_entries ORDER BY created_at DESC, id DESC').all();
   const invoiceRows = await db.prepare('SELECT * FROM invoice_triggers ORDER BY created_at DESC, id DESC').all();
@@ -991,6 +1010,7 @@ async function readState(db: D1Database) {
   const liveTableHealth = await readSupabaseLiveTableHealth();
   const pendingMobileChanges = Number(mobileSyncRow?.pending_changes ?? 0);
   const documentCounts = buildVendorDocumentCountMap(vendorDocumentRows.results);
+  const documentRecords = buildVendorDocumentMap(vendorDocumentRows.results);
 
   return {
     audit: auditRows.results.map((row) => ({
@@ -1110,6 +1130,7 @@ async function readState(db: D1Database) {
         license: vendorDocumentCount(documentCounts, String(row.id), 'license', String(row.license_status)),
         w9: vendorDocumentCount(documentCounts, String(row.id), 'w9', String(row.w9_status)),
       },
+      documents: documentRecords[String(row.id)] ?? [],
       email: String(row.email),
       feePercent: Number(row.flairo_fee_percent),
       id: String(row.id),
@@ -1209,7 +1230,7 @@ async function pushMobileUpdate() {
   await logEvent('Mobile app push', 'mobile-app', 'Manual mobile application update completed from the FLAIRO control center.');
 }
 
-async function upsertVendor(payload: Record<string, string | number | boolean | null>) {
+async function upsertVendor(payload: ActionPayload) {
   const stamp = now();
   const existingVendorId = textPayload(payload, 'vendorId')?.trim();
   const vendorId = existingVendorId || vendorIdFromName(textPayload(payload, 'name') ?? 'vendor');
@@ -1252,21 +1273,38 @@ async function upsertVendor(payload: Record<string, string | number | boolean | 
   await logEvent('Vendor profile', vendorId, `${name} ${existing ? 'updated' : 'created'} with ${services.length} eligible service line${services.length === 1 ? '' : 's'}.`);
 }
 
-async function recordDocumentUpload(vendorId?: string, documentType?: string) {
+async function recordDocumentUpload(payload: ActionPayload) {
+  const vendorId = textPayload(payload, 'vendorId');
+  const documentType = textPayload(payload, 'documentType');
   if (!vendorId || !documentType) return;
   const stamp = now();
-  const documentColumns: Record<string, string> = {
-    contract: 'contract_status',
-    insurance: 'insurance_status',
-    license: 'license_status',
-    w9: 'w9_status',
-  };
-  const column = documentColumns[documentType];
+  const column = documentStatusColumn(documentType);
   if (!column) return;
+  const fileName = textPayload(payload, 'fileName') ?? `${documentType} upload`;
+  const fileType = textPayload(payload, 'fileType') ?? 'application/octet-stream';
+  const fileSize = numericPayload(payload, 'fileSize', 0);
+  const fileData = textPayload(payload, 'fileData');
+  const documentId = `DOC-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const storageKey = `vendor-documents/${vendorId}/${documentType}/${documentId}-${safeFileName(fileName)}`;
+
+  if (fileData) {
+    await env.FILES.put(storageKey, dataUrlToArrayBuffer(fileData), {
+      httpMetadata: {
+        contentType: fileType,
+      },
+    });
+  }
+
   await env.DB.prepare(`UPDATE vendors SET ${column} = ?, compliance_status = ?, onboarding_stage = ?, updated_at = ? WHERE id = ?`)
     .bind('Under review', 'Review needed', `${documentType} uploaded for review`, stamp, vendorId)
     .run();
-  await insertVendorDocument(vendorId, documentType, 'Under review');
+  await insertVendorDocument(vendorId, documentType, 'Under review', textPayload(payload, 'expiresAt') ?? null, {
+    fileName,
+    fileSize,
+    fileType,
+    id: documentId,
+    storageKey,
+  });
   await logEvent('Vendor document', vendorId, `${documentType} uploaded and placed under review.`);
 }
 
@@ -1275,11 +1313,94 @@ async function insertVendorDocument(
   documentType: string,
   status: string,
   expiresAt?: string | null,
+  details: {
+    fileName?: string;
+    fileSize?: number;
+    fileType?: string;
+    id?: string;
+    storageKey?: string;
+  } = {},
 ) {
   const stamp = now();
-  await env.DB.prepare('INSERT INTO vendor_documents (id, vendor_id, document_type, status, storage_key, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .bind(`DOC-${Date.now()}-${Math.floor(Math.random() * 1000)}`, vendorId, documentType, status, `vendor-documents/${vendorId}/${documentType}-${Date.now()}`, expiresAt ?? null, stamp)
+  const documentId = details.id ?? `DOC-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  await env.DB.prepare('INSERT INTO vendor_documents (id, vendor_id, document_type, status, storage_key, file_name, file_type, file_size, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(
+      documentId,
+      vendorId,
+      documentType,
+      status,
+      details.storageKey ?? `vendor-documents/${vendorId}/${documentType}/${documentId}.metadata`,
+      details.fileName ?? `${documentType} upload`,
+      details.fileType ?? 'application/octet-stream',
+      details.fileSize ?? 0,
+      expiresAt ?? null,
+      stamp,
+    )
     .run();
+}
+
+async function reviewVendorDocument(vendorId?: string, documentType?: string, status?: string) {
+  if (!vendorId || !documentType || !status) return;
+  if (!['Verified', 'Under review', 'Needs upload', 'Expiring'].includes(status)) return;
+  const column = documentStatusColumn(documentType);
+  if (!column) return;
+  const stamp = now();
+
+  await env.DB.prepare(`UPDATE vendors SET ${column} = ?, onboarding_stage = ?, updated_at = ? WHERE id = ?`)
+    .bind(status, `${documentType} marked ${status}`, stamp, vendorId)
+    .run();
+
+  const latest = await env.DB.prepare('SELECT id FROM vendor_documents WHERE vendor_id = ? AND document_type = ? ORDER BY created_at DESC, id DESC LIMIT 1')
+    .bind(vendorId, documentType)
+    .first<{ id: string }>();
+
+  if (latest?.id) {
+    await env.DB.prepare('UPDATE vendor_documents SET status = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?')
+      .bind(status, 'FLAIRO ADMIN', stamp, latest.id)
+      .run();
+  }
+
+  const vendor = await env.DB.prepare('SELECT insurance_status, license_status, w9_status, contract_status FROM vendors WHERE id = ?')
+    .bind(vendorId)
+    .first<Record<string, unknown>>();
+  const statuses = [
+    String(vendor?.insurance_status ?? ''),
+    String(vendor?.license_status ?? ''),
+    String(vendor?.w9_status ?? ''),
+    String(vendor?.contract_status ?? ''),
+  ];
+  const complianceStatus = statuses.every((item) => item === 'Verified') ? 'Compliant' : 'Review needed';
+
+  await env.DB.prepare('UPDATE vendors SET compliance_status = ?, updated_at = ? WHERE id = ?')
+    .bind(complianceStatus, stamp, vendorId)
+    .run();
+  await logEvent('Document review', vendorId, `${documentType} marked ${status}.`);
+}
+
+async function downloadVendorDocument(documentId: string) {
+  const document = await env.DB.prepare('SELECT * FROM vendor_documents WHERE id = ? LIMIT 1')
+    .bind(documentId)
+    .first<Record<string, unknown>>();
+
+  if (!document) {
+    return Response.json({ error: 'Vendor document was not found.' }, { status: 404 });
+  }
+
+  const storageKey = String(document.storage_key ?? '');
+  const object = storageKey ? await env.FILES.get(storageKey) : null;
+  if (!object) {
+    return Response.json({ error: 'The document record exists, but the original file is not available.' }, { status: 404 });
+  }
+
+  const fileName = safeFileName(String(document.file_name ?? 'flairo-vendor-document'));
+  const fileType = String(document.file_type ?? object.httpMetadata?.contentType ?? 'application/octet-stream');
+
+  return new Response(object.body, {
+    headers: {
+      'content-disposition': `inline; filename="${fileName}"`,
+      'content-type': fileType,
+    },
+  });
 }
 
 async function approveVendor(vendorId?: string) {
@@ -1715,7 +1836,7 @@ function cents(value: number) {
   return Math.round(value * 100);
 }
 
-function numericPayload(payload: Record<string, string | number | boolean | null>, key: string, fallback: number) {
+function numericPayload(payload: ActionPayload, key: string, fallback: number) {
   const value = payload[key];
   if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
   if (typeof value === 'string') {
@@ -1725,18 +1846,18 @@ function numericPayload(payload: Record<string, string | number | boolean | null
   return fallback;
 }
 
-function textPayload(payload: Record<string, string | number | boolean | null>, key: string) {
+function textPayload(payload: ActionPayload, key: string) {
   const value = payload[key];
   if (value === null || value === undefined) return undefined;
   return String(value);
 }
 
-function listPayload(payload: Record<string, string | number | boolean | null>, key: string, fallback: string[]) {
+function listPayload(payload: ActionPayload, key: string, fallback: string[]) {
   const value = textPayload(payload, key);
   return value === undefined ? fallback : parseJsonArray(value);
 }
 
-function booleanPayload(payload: Record<string, string | number | boolean | null>, key: string, fallback: boolean) {
+function booleanPayload(payload: ActionPayload, key: string, fallback: boolean) {
   const value = payload[key];
   if (typeof value === 'boolean') return value;
   if (typeof value === 'number') return value !== 0;
@@ -1749,6 +1870,16 @@ function normalizeRewardStatus(value: string) {
   return 'Available';
 }
 
+function documentStatusColumn(documentType: string) {
+  const documentColumns: Record<string, string> = {
+    contract: 'contract_status',
+    insurance: 'insurance_status',
+    license: 'license_status',
+    w9: 'w9_status',
+  };
+  return documentColumns[documentType];
+}
+
 function dollarsFromCents(value: number) {
   return value / 100;
 }
@@ -1759,8 +1890,33 @@ function buildVendorDocumentCountMap(rows: Record<string, unknown>[]) {
     const documentType = String(row.document_type ?? '');
     if (!vendorId || !documentType) return counts;
     counts[vendorId] = counts[vendorId] ?? {};
-    counts[vendorId][documentType] = Number(row.count ?? 0);
+    counts[vendorId][documentType] = row.count === undefined
+      ? (counts[vendorId][documentType] ?? 0) + 1
+      : Number(row.count ?? 0);
     return counts;
+  }, {});
+}
+
+function buildVendorDocumentMap(rows: Record<string, unknown>[]) {
+  return rows.reduce<Record<string, Array<Record<string, unknown>>>>((documents, row) => {
+    const vendorId = String(row.vendor_id ?? '');
+    const documentType = String(row.document_type ?? '');
+    if (!vendorId || !['contract', 'insurance', 'license', 'w9'].includes(documentType)) return documents;
+    documents[vendorId] = documents[vendorId] ?? [];
+    documents[vendorId].push({
+      createdAt: String(row.created_at ?? ''),
+      expiresAt: row.expires_at ? String(row.expires_at) : null,
+      fileName: String(row.file_name ?? ''),
+      fileSize: Number(row.file_size ?? 0),
+      fileType: String(row.file_type ?? ''),
+      id: String(row.id),
+      reviewedAt: row.reviewed_at ? String(row.reviewed_at) : null,
+      reviewedBy: row.reviewed_by ? String(row.reviewed_by) : null,
+      status: String(row.status ?? 'Under review'),
+      storageKey: String(row.storage_key ?? ''),
+      type: documentType,
+    });
+    return documents;
   }, {});
 }
 
@@ -1780,6 +1936,24 @@ function parseJsonArray(value: string) {
   } catch {
     return [];
   }
+}
+
+function dataUrlToArrayBuffer(value: string) {
+  const base64 = value.includes(',') ? value.slice(value.indexOf(',') + 1) : value;
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes.buffer;
+}
+
+function safeFileName(value: string) {
+  return value
+    .replace(/[/\\?%*:|"<>]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120) || 'flairo-document';
 }
 
 function vendorIdFromName(name: string) {

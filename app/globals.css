@@ -625,6 +625,13 @@ a:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.section-subtitle {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
 .split-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 0.75fr);
@@ -1401,6 +1408,192 @@ input::placeholder {
   padding: 6px 9px;
 }
 
+.vendor-rating-pill {
+  border-color: rgba(247, 134, 199, 0.34) !important;
+  background:
+    linear-gradient(120deg, rgba(247, 134, 199, 0.2), rgba(255, 255, 255, 0.04), rgba(247, 134, 199, 0.12)) !important;
+  color: #ffd6ea !important;
+}
+
+.vendor-profile-page {
+  display: grid;
+  gap: 18px;
+}
+
+.vendor-profile-hero {
+  display: grid;
+  gap: 18px;
+}
+
+.profile-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.profile-heading h2 {
+  margin: 4px 0 6px;
+  color: #ffffff;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(30px, 4vw, 42px);
+  font-weight: 500;
+  line-height: 1.05;
+}
+
+.profile-heading p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.profile-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.vendor-profile-form,
+.document-workflow-panel,
+.vendor-history-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.document-workflow-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.document-workflow-card {
+  display: grid;
+  gap: 13px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 14px;
+}
+
+.document-workflow-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.document-workflow-head h3 {
+  margin: 0;
+  color: #ffffff;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 22px;
+  font-weight: 500;
+}
+
+.document-workflow-head p,
+.document-latest span,
+.document-latest em,
+.document-archive-row em {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.document-latest {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 10px;
+}
+
+.document-latest span,
+.document-latest strong {
+  display: block;
+}
+
+.document-latest strong {
+  margin-top: 4px;
+  color: var(--ivory);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.document-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.document-archive {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 10px;
+}
+
+.document-archive-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px 95px;
+  gap: 10px;
+  align-items: center;
+}
+
+.document-archive-row span,
+.document-archive-row strong {
+  color: var(--ivory-2);
+  font-size: 12px;
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+
+.compact-search {
+  display: grid;
+  gap: 6px;
+  min-width: min(330px, 100%);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.compact-search input {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.vendor-history-list {
+  display: grid;
+  gap: 12px;
+}
+
+.vendor-history-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 14px;
+}
+
+.vendor-history-card h3 {
+  margin: 8px 0 4px;
+  color: #ffffff;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 21px;
+  font-weight: 500;
+}
+
+.vendor-history-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.vendor-history-facts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .job-timer {
   display: grid;
   gap: 3px;
@@ -1795,6 +1988,8 @@ input::placeholder {
   .statement-numbers,
   .vendor-month-summary,
   .vendor-profile-grid,
+  .profile-summary-grid,
+  .document-workflow-list,
   .reward-filter-bar,
   .reward-control-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1836,6 +2031,7 @@ input::placeholder {
   .command-panel,
   .section-band,
   .vendor-head,
+  .profile-heading,
   .task-main,
   .invoice-ready-row,
   .open-statement-head,
@@ -1872,6 +2068,10 @@ input::placeholder {
   .form-grid.three,
   .vendor-month-row,
   .vendor-profile-grid,
+  .profile-summary-grid,
+  .document-workflow-list,
+  .document-archive-row,
+  .vendor-history-facts,
   .vendor-statement-job,
   .open-statement-facts,
   .open-statement-item,
