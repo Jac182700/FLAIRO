@@ -46,10 +46,121 @@ button {
   font: inherit;
 }
 
+input {
+  font: inherit;
+}
+
 button:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--pink);
   outline-offset: 3px;
+}
+
+.admin-auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    linear-gradient(140deg, rgba(247, 134, 199, 0.08), transparent 34%),
+    linear-gradient(18deg, rgba(212, 175, 55, 0.08), transparent 32%),
+    var(--charcoal);
+}
+
+.admin-auth-card {
+  width: min(100%, 560px);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(21, 21, 23, 0.94);
+  padding: 28px;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.36);
+}
+
+.admin-auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin-bottom: 24px;
+}
+
+.admin-auth-card h1 {
+  margin: 8px 0 10px;
+  color: #ffffff;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 34px;
+  font-weight: 500;
+  line-height: 1.04;
+}
+
+.admin-auth-card p {
+  margin: 0;
+  color: #d8d3cd;
+  line-height: 1.55;
+}
+
+.admin-auth-alert {
+  margin-top: 18px;
+  border: 1px solid rgba(247, 134, 199, 0.3);
+  border-radius: 8px;
+  background: rgba(247, 134, 199, 0.1);
+  color: #f7ddea;
+  font-size: 14px;
+  line-height: 1.45;
+  padding: 12px 13px;
+}
+
+.admin-auth-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.admin-auth-form label {
+  display: grid;
+  gap: 7px;
+}
+
+.admin-auth-form label span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-auth-form input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #101013;
+  color: var(--ivory);
+  padding: 12px 13px;
+}
+
+.admin-auth-form input:focus {
+  border-color: rgba(247, 134, 199, 0.7);
+  outline: none;
+}
+
+.admin-auth-form button {
+  border: 0;
+  border-radius: 8px;
+  background: var(--pink);
+  color: #0b090a;
+  cursor: pointer;
+  font-weight: 900;
+  padding: 13px 15px;
+}
+
+.admin-auth-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.admin-auth-note {
+  margin-top: 16px !important;
+  color: var(--muted) !important;
+  font-size: 13px;
 }
 
 .app-shell {
@@ -250,6 +361,21 @@ a:focus-visible {
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
+}
+
+.sign-out-button {
+  margin-top: 8px;
+  border: 1px solid rgba(247, 134, 199, 0.35);
+  background: rgba(247, 134, 199, 0.12);
+  color: var(--ivory);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 6px 9px;
+}
+
+.sign-out-button:hover {
+  border-color: rgba(247, 134, 199, 0.68);
+  background: rgba(247, 134, 199, 0.2);
 }
 
 .sync-panel span {

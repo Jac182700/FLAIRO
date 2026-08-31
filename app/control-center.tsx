@@ -730,9 +730,15 @@ function localDateTime(value = new Date()) {
 }
 
 export default function ControlCenter({
+  authToken,
+  onAccessRejected,
+  onSignOut,
   viewerEmail,
   viewerName,
 }: {
+  authToken: string;
+  onAccessRejected?: () => void;
+  onSignOut?: () => void;
   viewerEmail: string;
   viewerName: string;
 }) {
@@ -776,12 +782,22 @@ export default function ControlCenter({
     if (state.vendors) setVendors(state.vendors);
   };
 
+  const authorizedHeaders = useMemo(
+    () => ({
+      Authorization: `Bearer ${authToken}`,
+    }),
+    [authToken],
+  );
+
   useEffect(() => {
     let active = true;
 
     const loadState = () => {
-      fetch('/api/flairo')
+      fetch('/api/flairo', { headers: authorizedHeaders })
         .then((response) => {
+          if (response.status === 401 || response.status === 403) {
+            onAccessRejected?.();
+          }
           if (!response.ok) throw new Error('FLAIRO data unavailable');
           return response.json() as Promise<FlairoState>;
         })
@@ -808,7 +824,7 @@ export default function ControlCenter({
       active = false;
       clearInterval(timer);
     };
-  }, []);
+  }, [authorizedHeaders, onAccessRejected]);
 
   useEffect(() => {
     const timer = setInterval(() => setClock(Date.now()), MINUTE_MS);
@@ -841,9 +857,12 @@ export default function ControlCenter({
     try {
       const response = await fetch('/api/flairo', {
         body: JSON.stringify({ action, payload }),
-        headers: { 'content-type': 'application/json' },
+        headers: { ...authorizedHeaders, 'content-type': 'application/json' },
         method: 'POST',
       });
+      if (response.status === 401 || response.status === 403) {
+        onAccessRejected?.();
+      }
       if (!response.ok) throw new Error('Save failed');
       const state = await response.json() as FlairoState;
       applyServerState(state);
@@ -1444,9 +1463,12 @@ export default function ControlCenter({
     try {
       const response = await fetch('/api/flairo', {
         body: JSON.stringify({ action: 'push_mobile_update', payload: {} }),
-        headers: { 'content-type': 'application/json' },
+        headers: { ...authorizedHeaders, 'content-type': 'application/json' },
         method: 'POST',
       });
+      if (response.status === 401 || response.status === 403) {
+        onAccessRejected?.();
+      }
       if (!response.ok) throw new Error('Mobile push failed');
       const state = await response.json() as FlairoState;
       applyServerState(state);
@@ -1523,6 +1545,11 @@ export default function ControlCenter({
             <div className="user-panel">
               <span>{viewerName}</span>
               <strong>{viewerEmail}</strong>
+              {onSignOut && (
+                <button className="sign-out-button" onClick={onSignOut} type="button">
+                  Sign out
+                </button>
+              )}
             </div>
           </div>
         </header>

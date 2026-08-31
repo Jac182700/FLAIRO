@@ -556,8 +556,134 @@ const invoices: InvoiceSeed[] = [
   },
 ];
 
-export async function GET() {
+type SupabaseAdminUser = {
+  email: string;
+  fullName: string;
+  role: string;
+};
+
+type SupabaseAuthUser = {
+  id?: string;
+  email?: string;
+};
+
+const adminRoles = new Set(['owner', 'admin', 'operations']);
+
+function runtimeSupabaseConfig() {
+  const runtimeEnv = env as unknown as Record<string, string | undefined>;
+  return {
+    publishableKey: runtimeEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+    url: runtimeEnv.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, ''),
+  };
+}
+
+async function readJson<T>(response: Response) {
+  const text = await response.text();
+  if (!text) return {} as T;
+
   try {
+    return JSON.parse(text) as T;
+  } catch {
+    return {} as T;
+  }
+}
+
+function getBearerToken(request: Request) {
+  const header = request.headers.get('authorization');
+  const match = header?.match(/^Bearer\s+(.+)$/i);
+  return match?.[1] ?? null;
+}
+
+function adminAuthError(message: string, status: number) {
+  return Response.json({ error: message }, { status });
+}
+
+async function requireSupabaseAdmin(request: Request): Promise<
+  | { admin: SupabaseAdminUser }
+  | { response: Response }
+> {
+  const { publishableKey, url } = runtimeSupabaseConfig();
+  const token = getBearerToken(request);
+
+  if (!url || !publishableKey) {
+    return {
+      response: adminAuthError('Supabase Admin login is not configured for this deployment.', 503),
+    };
+  }
+
+  if (!token) {
+    return {
+      response: adminAuthError('FLAIRO Admin sign-in is required.', 401),
+    };
+  }
+
+  const userResponse = await fetch(`${url}/auth/v1/user`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: publishableKey,
+    },
+  });
+
+  if (!userResponse.ok) {
+    return {
+      response: adminAuthError('FLAIRO Admin session could not be verified.', 401),
+    };
+  }
+
+  const authUser = await readJson<SupabaseAuthUser>(userResponse);
+  const email = authUser.email?.toLowerCase();
+
+  if (!authUser.id || !email) {
+    return {
+      response: adminAuthError('FLAIRO Admin session is missing account details.', 401),
+    };
+  }
+
+  const profileResponse = await fetch(
+    `${url}/rest/v1/flairo_app_users?select=email,full_name,role,status&email=eq.${encodeURIComponent(email)}&limit=1`,
+    {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+        apikey: publishableKey,
+      },
+    },
+  );
+
+  if (!profileResponse.ok) {
+    return {
+      response: adminAuthError('FLAIRO Admin profile could not be checked.', 403),
+    };
+  }
+
+  const profiles = await readJson<Array<{
+    email: string;
+    full_name: string;
+    role: string;
+    status: string;
+  }>>(profileResponse);
+  const profile = profiles[0];
+
+  if (!profile || profile.status !== 'active' || !adminRoles.has(profile.role)) {
+    return {
+      response: adminAuthError('This account is not approved for FLAIRO Admin access.', 403),
+    };
+  }
+
+  return {
+    admin: {
+      email: profile.email,
+      fullName: profile.full_name,
+      role: profile.role,
+    },
+  };
+}
+
+export async function GET(request: Request) {
+  try {
+    const auth = await requireSupabaseAdmin(request);
+    if ('response' in auth) return auth.response;
+
     await initializeDatabase(env.DB);
     await seedDatabase(env.DB);
     await touchMobileConnection(env.DB);
@@ -569,6 +695,9 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const auth = await requireSupabaseAdmin(request);
+    if ('response' in auth) return auth.response;
+
     await initializeDatabase(env.DB);
     await seedDatabase(env.DB);
     const body = await request.json() as { action?: string; payload?: Record<string, string | number | boolean | null> };
