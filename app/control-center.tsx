@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
 
 type ModuleId =
   | 'command'
@@ -15,6 +15,7 @@ type ModuleId =
 
 type VendorStatus = 'Compliant' | 'Review needed' | 'Pending onboarding';
 type DocumentStatus = 'Verified' | 'Under review' | 'Needs upload' | 'Expiring';
+type VendorDocumentType = 'insurance' | 'license' | 'w9' | 'contract';
 type BoardStatus = 'Open' | 'Claimed' | 'Scheduled' | 'Completed';
 type InvoiceStatus = 'Waiting' | 'Ready' | 'Draft queued' | 'Sent' | 'Paid' | 'Hold';
 type StatementStatus = 'Draft' | 'Ready' | 'Issued';
@@ -48,17 +49,24 @@ type Community = {
 type Vendor = {
   id: string;
   name: string;
+  dbaName: string;
   contact: string;
   email: string;
   phone: string;
+  physicalAddress: string;
   markets: string[];
+  serviceLocations: string[];
   services: string[];
   status: VendorStatus;
   boardAccess: boolean;
   insurance: DocumentStatus;
   license: DocumentStatus;
   w9: DocumentStatus;
+  contract: DocumentStatus;
+  contractExpiresAt: string | null;
+  documentCounts: Record<VendorDocumentType, number>;
   feePercent: number;
+  pricingNotes: string;
   stage: string;
   rating: number;
   preferred: boolean;
@@ -195,6 +203,24 @@ type ManualJobDraft = {
   preferredWindow: string;
   serviceDate: string;
   amount: string;
+};
+
+type VendorFormDraft = {
+  id: string;
+  name: string;
+  dbaName: string;
+  contact: string;
+  email: string;
+  phone: string;
+  physicalAddress: string;
+  serviceLocations: string;
+  services: string[];
+  boardAccess: boolean;
+  preferred: boolean;
+  feePercent: string;
+  pricingNotes: string;
+  contractExpiresAt: string;
+  contractUploadQueued: boolean;
 };
 
 type RewardAdjustmentDraft = {
@@ -368,17 +394,24 @@ const initialVendors: Vendor[] = [
   {
     id: 'sparkle',
     name: 'Sparkle & Settle Cleaning Co.',
+    dbaName: 'Sparkle & Settle',
     contact: 'Elena Martinez',
     email: 'operations@sparklesettle.example',
     phone: '(305) 555-0181',
+    physicalAddress: '420 Las Olas Blvd, Fort Lauderdale, FL 33301',
     markets: ['Fort Lauderdale, FL', 'Sunrise, FL'],
+    serviceLocations: ['33301', '33304', '33322', 'Sunrise, FL'],
     services: ['Recurring housekeeping', 'Move-out deep cleaning'],
     status: 'Compliant',
     boardAccess: true,
     insurance: 'Verified',
     license: 'Verified',
     w9: 'Verified',
+    contract: 'Verified',
+    contractExpiresAt: '2027-08-31',
+    documentCounts: { contract: 1, insurance: 1, license: 1, w9: 1 },
     feePercent: 10,
+    pricingNotes: 'Housekeeping priced by home size; vendor consults resident for recurring cadence.',
     stage: 'Board access active',
     rating: 4.8,
     preferred: true,
@@ -386,17 +419,24 @@ const initialVendors: Vendor[] = [
   {
     id: 'pink-palm',
     name: 'Pink Palm Pet Care',
+    dbaName: 'Pink Palm',
     contact: 'Jordan Ellis',
     email: 'hello@pinkpalmpet.example',
     phone: '(954) 555-0174',
+    physicalAddress: '1120 NE 4th Ave, Fort Lauderdale, FL 33304',
     markets: ['Fort Lauderdale, FL'],
+    serviceLocations: ['33301', '33304', '33305'],
     services: ['Dog walking and drop-ins'],
     status: 'Review needed',
     boardAccess: false,
     insurance: 'Expiring',
     license: 'Verified',
     w9: 'Verified',
+    contract: 'Verified',
+    contractExpiresAt: '2026-10-15',
+    documentCounts: { contract: 1, insurance: 1, license: 1, w9: 1 },
     feePercent: 10,
+    pricingNotes: 'Resident pays vendor directly at visit completion.',
     stage: 'Insurance renewal review',
     rating: 4.7,
     preferred: false,
@@ -404,17 +444,24 @@ const initialVendors: Vendor[] = [
   {
     id: 'porter',
     name: 'Porter Preferred Movers',
+    dbaName: 'Porter Preferred',
     contact: 'Andre Collins',
     email: 'dispatch@porterpreferred.example',
     phone: '(786) 555-0142',
+    physicalAddress: '9900 NW 21st St, Doral, FL 33172',
     markets: ['Miami, FL', 'Sunrise, FL'],
+    serviceLocations: ['33132', '33137', '33323', '33351'],
     services: ['Preferred movers'],
     status: 'Pending onboarding',
     boardAccess: false,
     insurance: 'Under review',
     license: 'Needs upload',
     w9: 'Verified',
+    contract: 'Under review',
+    contractExpiresAt: '2027-01-31',
+    documentCounts: { contract: 1, insurance: 1, license: 0, w9: 1 },
     feePercent: 10,
+    pricingNotes: 'Moving estimates handled directly with resident after claim.',
     stage: 'License upload needed',
     rating: 4.5,
     preferred: true,
@@ -422,17 +469,24 @@ const initialVendors: Vendor[] = [
   {
     id: 'hex-key',
     name: 'Hex Key Home Services',
+    dbaName: 'Hex Key',
     contact: 'Nina Patel',
     email: 'jobs@hexkeyhome.example',
     phone: '(561) 555-0126',
+    physicalAddress: '7800 Biscayne Blvd, Miami, FL 33138',
     markets: ['Miami, FL', 'Fort Lauderdale, FL'],
+    serviceLocations: ['33138', '33137', '33301', '33308'],
     services: ['Handyman work', 'Move-out touch-up painting'],
     status: 'Compliant',
     boardAccess: true,
     insurance: 'Verified',
     license: 'Verified',
     w9: 'Verified',
+    contract: 'Verified',
+    contractExpiresAt: '2027-05-31',
+    documentCounts: { contract: 2, insurance: 1, license: 1, w9: 1 },
     feePercent: 10,
+    pricingNotes: 'Admin may set a service price, otherwise vendor confirms project scope with resident.',
     stage: 'Board access active',
     rating: 4.6,
     preferred: false,
@@ -923,14 +977,25 @@ export default function ControlCenter({
     void persistAction('toggle_service_visibility', { serviceId });
   };
 
-  const markDocumentUploaded = (vendorId: string, document: 'insurance' | 'license') => {
+  const markDocumentUploaded = (vendorId: string, document: VendorDocumentType) => {
+    const documentLabels: Record<VendorDocumentType, string> = {
+      contract: 'FLAIRO contract',
+      insurance: 'Insurance',
+      license: 'Business license',
+      w9: 'W-9',
+    };
+
     setVendors((current) =>
       current.map((vendor) =>
         vendor.id === vendorId
           ? {
               ...vendor,
               [document]: vendor[document] === 'Verified' ? 'Verified' : 'Under review',
-              stage: `${document === 'insurance' ? 'Insurance' : 'Business license'} uploaded for review`,
+              documentCounts: {
+                ...vendor.documentCounts,
+                [document]: (vendor.documentCounts[document] ?? 0) + 1,
+              },
+              stage: `${documentLabels[document]} uploaded for review`,
               status: vendor.status === 'Compliant' ? 'Compliant' : 'Review needed',
             }
           : vendor,
@@ -938,6 +1003,79 @@ export default function ControlCenter({
     );
     addAudit('Vendor document', `Compliance document uploaded for ${vendorName(vendorId, vendors)}.`);
     void persistAction('upload_document', { documentType: document, vendorId });
+  };
+
+  const saveVendorProfile = (draft: VendorFormDraft) => {
+    const name = draft.name.trim();
+    const contact = draft.contact.trim();
+    const email = draft.email.trim();
+    const phone = draft.phone.trim();
+    const serviceLocations = splitListInput(draft.serviceLocations);
+    const markets = serviceLocations.length ? serviceLocations : ['Market pending'];
+    const feePercent = Math.max(0, Number(draft.feePercent) || 0);
+    const vendorId = draft.id || vendorIdFromName(name);
+    const existingVendor = vendors.find((vendor) => vendor.id === vendorId);
+    const contractStatus: DocumentStatus = draft.contractUploadQueued
+      ? 'Under review'
+      : existingVendor?.contract ?? 'Needs upload';
+    const documentCounts = existingVendor?.documentCounts ?? { contract: 0, insurance: 0, license: 0, w9: 0 };
+
+    if (!name || !contact || !email || !phone) return false;
+
+    const savedVendor: Vendor = {
+      boardAccess: draft.boardAccess,
+      contact,
+      contract: contractStatus,
+      contractExpiresAt: draft.contractExpiresAt || (existingVendor?.contractExpiresAt ?? null),
+      dbaName: draft.dbaName.trim(),
+      documentCounts: {
+        ...documentCounts,
+        contract: draft.contractUploadQueued ? documentCounts.contract + 1 : documentCounts.contract,
+      },
+      email,
+      feePercent,
+      id: vendorId,
+      insurance: existingVendor?.insurance ?? 'Needs upload',
+      license: existingVendor?.license ?? 'Needs upload',
+      markets,
+      name,
+      phone,
+      physicalAddress: draft.physicalAddress.trim(),
+      preferred: draft.preferred,
+      pricingNotes: draft.pricingNotes.trim(),
+      rating: existingVendor?.rating ?? 0,
+      serviceLocations,
+      services: draft.services,
+      stage: existingVendor ? 'Profile updated by FLAIRO Admin' : 'Profile created by FLAIRO Admin',
+      status: draft.boardAccess ? 'Compliant' : existingVendor?.status ?? 'Pending onboarding',
+      w9: existingVendor?.w9 ?? 'Needs upload',
+    };
+
+    setVendors((current) => {
+      const exists = current.some((vendor) => vendor.id === vendorId);
+      if (exists) return current.map((vendor) => (vendor.id === vendorId ? savedVendor : vendor));
+      return [savedVendor, ...current];
+    });
+    addAudit('Vendor profile', `${savedVendor.name} profile saved and staged for the next mobile app push.`);
+    void persistAction('upsert_vendor', {
+      boardAccess: savedVendor.boardAccess,
+      contractExpiresAt: savedVendor.contractExpiresAt,
+      contractUploadQueued: draft.contractUploadQueued,
+      dbaName: savedVendor.dbaName,
+      email: savedVendor.email,
+      feePercent: savedVendor.feePercent,
+      marketsJson: JSON.stringify(savedVendor.markets),
+      name: savedVendor.name,
+      phone: savedVendor.phone,
+      physicalAddress: savedVendor.physicalAddress,
+      preferred: savedVendor.preferred,
+      pricingNotes: savedVendor.pricingNotes,
+      serviceLocationsJson: JSON.stringify(savedVendor.serviceLocations),
+      servicesJson: JSON.stringify(savedVendor.services),
+      contact: savedVendor.contact,
+      vendorId,
+    });
+    return true;
   };
 
   const approveVendor = (vendorId: string) => {
@@ -1580,6 +1718,8 @@ export default function ControlCenter({
             approveVendor={approveVendor}
             highlightRecordId={activeModule === 'vendors' ? focusTarget?.recordId : null}
             markDocumentUploaded={markDocumentUploaded}
+            saveVendorProfile={saveVendorProfile}
+            services={services}
             vendors={vendors}
           />
         )}
@@ -2026,13 +2166,54 @@ function VendorsModule({
   approveVendor,
   highlightRecordId,
   markDocumentUploaded,
+  saveVendorProfile,
+  services,
   vendors,
 }: {
   approveVendor: (vendorId: string) => void;
   highlightRecordId?: string | null;
-  markDocumentUploaded: (vendorId: string, document: 'insurance' | 'license') => void;
+  markDocumentUploaded: (vendorId: string, document: VendorDocumentType) => void;
+  saveVendorProfile: (draft: VendorFormDraft) => boolean;
+  services: Service[];
   vendors: Vendor[];
 }) {
+  const [vendorDialog, setVendorDialog] = useState<{ mode: 'add' | 'edit'; draft: VendorFormDraft } | null>(null);
+
+  const updateVendorDraft = <K extends keyof VendorFormDraft>(field: K, value: VendorFormDraft[K]) => {
+    setVendorDialog((current) =>
+      current
+        ? {
+            ...current,
+            draft: {
+              ...current.draft,
+              [field]: value,
+            },
+          }
+        : current,
+    );
+  };
+
+  const toggleDraftService = (serviceName: string) => {
+    setVendorDialog((current) => {
+      if (!current) return current;
+      const servicesForVendor = current.draft.services.includes(serviceName)
+        ? current.draft.services.filter((service) => service !== serviceName)
+        : [...current.draft.services, serviceName];
+      return {
+        ...current,
+        draft: {
+          ...current.draft,
+          services: servicesForVendor,
+        },
+      };
+    });
+  };
+
+  const submitVendorProfile = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (vendorDialog && saveVendorProfile(vendorDialog.draft)) setVendorDialog(null);
+  };
+
   return (
     <>
       <MetricGrid
@@ -2066,7 +2247,12 @@ function VendorsModule({
             <p className="eyebrow">Vendor CRM and compliance</p>
             <h2>Onboarding, documents, and job-board access</h2>
           </div>
-          <button type="button">Invite vendor</button>
+          <div className="section-actions">
+            <button type="button" onClick={() => setVendorDialog({ mode: 'add', draft: blankVendorDraft() })}>
+              Add vendor
+            </button>
+            <button className="secondary-action" type="button">Invite vendor</button>
+          </div>
         </div>
         <div className="vendor-list">
           {vendors.map((vendor) => (
@@ -2080,10 +2266,20 @@ function VendorsModule({
                   <span className={vendor.status === 'Compliant' ? 'status good' : 'status review'}>
                     {vendor.status}
                   </span>
-                  <h3>{vendor.name}</h3>
+                  <h3 className={`vendor-name ${vendorVisibilityClass(vendor)}`}>{vendor.name}</h3>
                   <p>{vendor.contact} / {vendor.email} / {vendor.phone}</p>
+                  {vendor.dbaName && <p className="vendor-subline">DBA {vendor.dbaName}</p>}
                 </div>
-                <strong>{vendor.boardAccess ? 'Board access on' : 'No board access'}</strong>
+                <div className="vendor-head-actions">
+                  <strong>{vendor.boardAccess ? 'Board access on' : 'No board access'}</strong>
+                  <button
+                    className="secondary-action"
+                    onClick={() => setVendorDialog({ mode: 'edit', draft: vendorToDraft(vendor) })}
+                    type="button"
+                  >
+                    Edit vendor
+                  </button>
+                </div>
               </div>
 
               <div className="vendor-meta">
@@ -2093,10 +2289,35 @@ function VendorsModule({
                 <span>Rating {vendor.rating.toFixed(1)}</span>
               </div>
 
+              <div className="vendor-profile-grid">
+                <div className="vendor-detail">
+                  <span>Office address</span>
+                  <strong>{vendor.physicalAddress || 'Address needed'}</strong>
+                </div>
+                <div className="vendor-detail">
+                  <span>Service areas</span>
+                  <strong>{vendor.serviceLocations.length ? vendor.serviceLocations.join(', ') : 'Same as office market'}</strong>
+                </div>
+                <div className="vendor-detail">
+                  <span>Pricing</span>
+                  <strong>{vendor.pricingNotes || 'Vendor discusses pricing directly with resident'}</strong>
+                </div>
+                <div className="vendor-detail">
+                  <span>FLAIRO contract</span>
+                  <strong>{vendor.contractExpiresAt ? `Expires ${labelInputDate(vendor.contractExpiresAt)}` : 'Expiration date needed'}</strong>
+                </div>
+              </div>
+
+              <div className="vendor-document-summary">
+                <span>{documentTotal(vendor)} documents saved</span>
+                <span>{vendor.documentCounts.contract} contract record{vendor.documentCounts.contract === 1 ? '' : 's'}</span>
+              </div>
+
               <div className="doc-grid">
-                <DocumentTile label="Insurance" status={vendor.insurance} />
-                <DocumentTile label="Business license" status={vendor.license} />
-                <DocumentTile label="W-9" status={vendor.w9} />
+                <DocumentTile count={vendor.documentCounts.insurance} label="Insurance" status={vendor.insurance} />
+                <DocumentTile count={vendor.documentCounts.license} label="Business license" status={vendor.license} />
+                <DocumentTile count={vendor.documentCounts.w9} label="W-9" status={vendor.w9} />
+                <DocumentTile count={vendor.documentCounts.contract} expiresAt={vendor.contractExpiresAt} label="FLAIRO contract" status={vendor.contract} />
               </div>
 
               <div className="action-row">
@@ -2116,14 +2337,191 @@ function VendorsModule({
                   />
                   Upload license
                 </label>
-                <button type="button" onClick={() => approveVendor(vendor.id)}>
-                  Approve for board
+                <label className="file-upload">
+                  <input
+                    accept=".pdf,.png,.jpg,.jpeg"
+                    onChange={() => markDocumentUploaded(vendor.id, 'w9')}
+                    type="file"
+                  />
+                  Upload W-9
+                </label>
+                <label className="file-upload secondary">
+                  <input
+                    accept=".pdf,.png,.jpg,.jpeg"
+                    onChange={() => markDocumentUploaded(vendor.id, 'contract')}
+                    type="file"
+                  />
+                  Upload contract
+                </label>
+                <button className="gold-action sparkle-action" type="button" onClick={() => approveVendor(vendor.id)}>
+                  Flamingo a GO
                 </button>
               </div>
             </article>
           ))}
         </div>
       </section>
+
+      {vendorDialog && (
+        <div className="modal-backdrop">
+          <section
+            aria-labelledby="vendor-dialog-title"
+            aria-modal="true"
+            className="vendor-modal"
+            role="dialog"
+          >
+            <form onSubmit={submitVendorProfile}>
+              <div className="modal-head">
+                <div>
+                  <p className="eyebrow">Vendor profile</p>
+                  <h2 id="vendor-dialog-title">{vendorDialog.mode === 'add' ? 'Add vendor' : 'Edit vendor'}</h2>
+                </div>
+                <button className="secondary-action" onClick={() => setVendorDialog(null)} type="button">
+                  Close
+                </button>
+              </div>
+
+              <div className="form-grid two">
+                <label>
+                  Vendor name
+                  <input
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => updateVendorDraft('name', event.target.value)}
+                    required
+                    value={vendorDialog.draft.name}
+                  />
+                </label>
+                <label>
+                  DBA name
+                  <input
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => updateVendorDraft('dbaName', event.target.value)}
+                    value={vendorDialog.draft.dbaName}
+                  />
+                </label>
+                <label>
+                  Point of contact
+                  <input
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => updateVendorDraft('contact', event.target.value)}
+                    required
+                    value={vendorDialog.draft.contact}
+                  />
+                </label>
+                <label>
+                  Email
+                  <input
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => updateVendorDraft('email', event.target.value)}
+                    required
+                    type="email"
+                    value={vendorDialog.draft.email}
+                  />
+                </label>
+                <label>
+                  Phone
+                  <input
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => updateVendorDraft('phone', event.target.value)}
+                    required
+                    value={vendorDialog.draft.phone}
+                  />
+                </label>
+                <label>
+                  FLAIRO fee %
+                  <input
+                    min="0"
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => updateVendorDraft('feePercent', event.target.value)}
+                    step="0.25"
+                    type="number"
+                    value={vendorDialog.draft.feePercent}
+                  />
+                </label>
+              </div>
+
+              <label>
+                Physical address
+                <textarea
+                  onChange={(event: ChangeEvent<HTMLTextAreaElement>) => updateVendorDraft('physicalAddress', event.target.value)}
+                  rows={2}
+                  value={vendorDialog.draft.physicalAddress}
+                />
+              </label>
+
+              <label>
+                Service areas, cities, ZIPs
+                <textarea
+                  onChange={(event: ChangeEvent<HTMLTextAreaElement>) => updateVendorDraft('serviceLocations', event.target.value)}
+                  rows={3}
+                  value={vendorDialog.draft.serviceLocations}
+                />
+              </label>
+
+              <fieldset className="service-check-grid">
+                <legend>Eligible services</legend>
+                {services.map((service) => (
+                  <label className="check-control" key={service.id}>
+                    <input
+                      checked={vendorDialog.draft.services.includes(service.name)}
+                      onChange={() => toggleDraftService(service.name)}
+                      type="checkbox"
+                    />
+                    <span>{service.name}</span>
+                  </label>
+                ))}
+              </fieldset>
+
+              <div className="form-grid two">
+                <label>
+                  Service pricing
+                  <textarea
+                    onChange={(event: ChangeEvent<HTMLTextAreaElement>) => updateVendorDraft('pricingNotes', event.target.value)}
+                    rows={3}
+                    value={vendorDialog.draft.pricingNotes}
+                  />
+                </label>
+                <label>
+                  Contract expiration
+                  <input
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => updateVendorDraft('contractExpiresAt', event.target.value)}
+                    type="date"
+                    value={vendorDialog.draft.contractExpiresAt}
+                  />
+                </label>
+              </div>
+
+              <div className="vendor-modal-controls">
+                <label className="check-control">
+                  <input
+                    checked={vendorDialog.draft.boardAccess}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => updateVendorDraft('boardAccess', event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>Board access</span>
+                </label>
+                <label className="check-control">
+                  <input
+                    checked={vendorDialog.draft.preferred}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => updateVendorDraft('preferred', event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>Preferred vendor</span>
+                </label>
+                <label className="file-upload secondary inline-upload">
+                  <input
+                    accept=".pdf,.png,.jpg,.jpeg"
+                    onChange={() => updateVendorDraft('contractUploadQueued', true)}
+                    type="file"
+                  />
+                  {vendorDialog.draft.contractUploadQueued ? 'Contract selected' : 'Upload contract'}
+                </label>
+              </div>
+
+              <div className="modal-actions">
+                <button className="secondary-action" onClick={() => setVendorDialog(null)} type="button">
+                  Cancel
+                </button>
+                <button type="submit">Save vendor</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
     </>
   );
 }
@@ -3265,11 +3663,22 @@ function QueueRow({
   );
 }
 
-function DocumentTile({ label, status }: { label: string; status: DocumentStatus }) {
+function DocumentTile({
+  count,
+  expiresAt,
+  label,
+  status,
+}: {
+  count?: number;
+  expiresAt?: string | null;
+  label: string;
+  status: DocumentStatus;
+}) {
   return (
     <div className="doc-tile">
       <span>{label}</span>
       <strong className={status === 'Verified' ? 'good-text' : 'review-text'}>{status}</strong>
+      <em>{count ? `${count} saved` : 'No file saved'}{expiresAt ? ` / expires ${labelInputDate(expiresAt)}` : ''}</em>
     </div>
   );
 }
@@ -3381,6 +3790,80 @@ function rewardProgramRecommendation(settings: RewardSettings, expirationRisk: n
   if (adoptionIndex > settings.adoptionIndexPreviousMonth && settings.avgCxRating >= 4.5) return 'Growing well';
   if (adoptionIndex >= settings.adoptionIndexPreviousMonth) return 'Holding steady';
   return 'Watch adoption';
+}
+
+function blankVendorDraft(): VendorFormDraft {
+  return {
+    boardAccess: false,
+    contact: '',
+    contractExpiresAt: '',
+    contractUploadQueued: false,
+    dbaName: '',
+    email: '',
+    feePercent: '10',
+    id: '',
+    name: '',
+    phone: '',
+    physicalAddress: '',
+    preferred: false,
+    pricingNotes: '',
+    serviceLocations: '',
+    services: [],
+  };
+}
+
+function vendorToDraft(vendor: Vendor): VendorFormDraft {
+  return {
+    boardAccess: vendor.boardAccess,
+    contact: vendor.contact,
+    contractExpiresAt: vendor.contractExpiresAt ?? '',
+    contractUploadQueued: false,
+    dbaName: vendor.dbaName,
+    email: vendor.email,
+    feePercent: String(vendor.feePercent),
+    id: vendor.id,
+    name: vendor.name,
+    phone: vendor.phone,
+    physicalAddress: vendor.physicalAddress,
+    preferred: vendor.preferred,
+    pricingNotes: vendor.pricingNotes,
+    serviceLocations: (vendor.serviceLocations.length ? vendor.serviceLocations : vendor.markets).join('\n'),
+    services: vendor.services,
+  };
+}
+
+function splitListInput(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/[\n,]+/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function documentTotal(vendor: Vendor) {
+  return Object.values(vendor.documentCounts).reduce((sum, count) => sum + count, 0);
+}
+
+function labelInputDate(value: string) {
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) return value;
+  return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function vendorIdFromName(name: string) {
+  const slug = name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || `vendor-${Date.now()}`;
 }
 
 function sortVendorsForBoard(a: Vendor, b: Vendor) {

@@ -30,17 +30,22 @@ type CommunitySeed = {
 type VendorSeed = {
   id: string;
   name: string;
+  dbaName: string;
   contact: string;
   email: string;
   phone: string;
   markets: string[];
+  serviceLocations: string[];
   services: string[];
   status: string;
   boardAccess: boolean;
   insurance: string;
   license: string;
   w9: string;
+  contract: string;
+  contractExpiresAt: string | null;
   feePercent: number;
+  pricingNotes: string;
   stage: string;
   rating: number;
   preferred: boolean;
@@ -252,17 +257,22 @@ const vendors: VendorSeed[] = [
   {
     id: 'sparkle',
     name: 'Sparkle & Settle Cleaning Co.',
+    dbaName: 'Sparkle & Settle',
     contact: 'Elena Martinez',
     email: 'operations@sparklesettle.example',
     phone: '(305) 555-0181',
     markets: ['Fort Lauderdale, FL', 'Sunrise, FL'],
+    serviceLocations: ['33301', '33304', '33322', 'Sunrise, FL'],
     services: ['Recurring housekeeping', 'Move-out deep cleaning'],
     status: 'Compliant',
     boardAccess: true,
     insurance: 'Verified',
     license: 'Verified',
     w9: 'Verified',
+    contract: 'Verified',
+    contractExpiresAt: '2027-08-31',
     feePercent: 10,
+    pricingNotes: 'Housekeeping priced by home size; vendor consults resident for recurring cadence.',
     stage: 'Board access active',
     rating: 4.8,
     preferred: true,
@@ -270,17 +280,22 @@ const vendors: VendorSeed[] = [
   {
     id: 'pink-palm',
     name: 'Pink Palm Pet Care',
+    dbaName: 'Pink Palm',
     contact: 'Jordan Ellis',
     email: 'hello@pinkpalmpet.example',
     phone: '(954) 555-0174',
     markets: ['Fort Lauderdale, FL'],
+    serviceLocations: ['33301', '33304', '33305'],
     services: ['Dog walking and drop-ins'],
     status: 'Review needed',
     boardAccess: false,
     insurance: 'Expiring',
     license: 'Verified',
     w9: 'Verified',
+    contract: 'Verified',
+    contractExpiresAt: '2026-10-15',
     feePercent: 10,
+    pricingNotes: 'Resident pays vendor directly at visit completion.',
     stage: 'Insurance renewal review',
     rating: 4.7,
     preferred: false,
@@ -288,17 +303,22 @@ const vendors: VendorSeed[] = [
   {
     id: 'porter',
     name: 'Porter Preferred Movers',
+    dbaName: 'Porter Preferred',
     contact: 'Andre Collins',
     email: 'dispatch@porterpreferred.example',
     phone: '(786) 555-0142',
     markets: ['Miami, FL', 'Sunrise, FL'],
+    serviceLocations: ['33132', '33137', '33323', '33351'],
     services: ['Preferred movers'],
     status: 'Pending onboarding',
     boardAccess: false,
     insurance: 'Under review',
     license: 'Needs upload',
     w9: 'Verified',
+    contract: 'Under review',
+    contractExpiresAt: '2027-01-31',
     feePercent: 10,
+    pricingNotes: 'Moving estimates handled directly with resident after claim.',
     stage: 'License upload needed',
     rating: 4.5,
     preferred: true,
@@ -306,17 +326,22 @@ const vendors: VendorSeed[] = [
   {
     id: 'hex-key',
     name: 'Hex Key Home Services',
+    dbaName: 'Hex Key',
     contact: 'Nina Patel',
     email: 'jobs@hexkeyhome.example',
     phone: '(561) 555-0126',
     markets: ['Miami, FL', 'Fort Lauderdale, FL'],
+    serviceLocations: ['33138', '33137', '33301', '33308'],
     services: ['Handyman work', 'Move-out touch-up painting'],
     status: 'Compliant',
     boardAccess: true,
     insurance: 'Verified',
     license: 'Verified',
     w9: 'Verified',
+    contract: 'Verified',
+    contractExpiresAt: '2027-05-31',
     feePercent: 10,
+    pricingNotes: 'Admin may set a service price, otherwise vendor confirms project scope with resident.',
     stage: 'Board access active',
     rating: 4.6,
     preferred: false,
@@ -716,6 +741,10 @@ export async function POST(request: Request) {
         await recordDocumentUpload(textPayload(payload, 'vendorId'), textPayload(payload, 'documentType'));
         stageMobileChange = true;
         break;
+      case 'upsert_vendor':
+        await upsertVendor(payload);
+        stageMobileChange = true;
+        break;
       case 'approve_vendor':
         await approveVendor(textPayload(payload, 'vendorId'));
         stageMobileChange = true;
@@ -805,7 +834,7 @@ async function initializeDatabase(db: D1Database) {
   await db.batch([
     db.prepare('CREATE TABLE IF NOT EXISTS communities (id TEXT PRIMARY KEY, name TEXT NOT NULL, market TEXT NOT NULL, address TEXT NOT NULL, property_manager TEXT NOT NULL, homes INTEGER NOT NULL, occupied_homes INTEGER NOT NULL, plus_enabled INTEGER NOT NULL DEFAULT 0, plus_members INTEGER NOT NULL DEFAULT 0, service_penetration REAL NOT NULL DEFAULT 0, net_income_cents INTEGER NOT NULL DEFAULT 0, statement_status TEXT NOT NULL DEFAULT "Draft", created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS services (id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, mobile_visible INTEGER NOT NULL DEFAULT 1, standard_price_cents INTEGER NOT NULL, plus_price_cents INTEGER NOT NULL, points_rule TEXT NOT NULL, vendor_pool_rule TEXT NOT NULL, updated_at TEXT NOT NULL)'),
-    db.prepare('CREATE TABLE IF NOT EXISTS vendors (id TEXT PRIMARY KEY, business_name TEXT NOT NULL, primary_contact TEXT NOT NULL, email TEXT NOT NULL, phone TEXT NOT NULL, markets TEXT NOT NULL, services TEXT NOT NULL, onboarding_stage TEXT NOT NULL, compliance_status TEXT NOT NULL, board_access INTEGER NOT NULL DEFAULT 0, preferred_vendor INTEGER NOT NULL DEFAULT 0, insurance_status TEXT NOT NULL DEFAULT "Needs upload", license_status TEXT NOT NULL DEFAULT "Needs upload", w9_status TEXT NOT NULL DEFAULT "Needs upload", flairo_fee_percent REAL NOT NULL DEFAULT 10, rating REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
+    db.prepare('CREATE TABLE IF NOT EXISTS vendors (id TEXT PRIMARY KEY, business_name TEXT NOT NULL, dba_name TEXT NOT NULL DEFAULT "", primary_contact TEXT NOT NULL, email TEXT NOT NULL, phone TEXT NOT NULL, physical_address TEXT NOT NULL DEFAULT "", markets TEXT NOT NULL, service_locations TEXT NOT NULL DEFAULT "[]", services TEXT NOT NULL, pricing_notes TEXT NOT NULL DEFAULT "", onboarding_stage TEXT NOT NULL, compliance_status TEXT NOT NULL, board_access INTEGER NOT NULL DEFAULT 0, preferred_vendor INTEGER NOT NULL DEFAULT 0, insurance_status TEXT NOT NULL DEFAULT "Needs upload", license_status TEXT NOT NULL DEFAULT "Needs upload", w9_status TEXT NOT NULL DEFAULT "Needs upload", contract_status TEXT NOT NULL DEFAULT "Needs upload", contract_expires_at TEXT, flairo_fee_percent REAL NOT NULL DEFAULT 10, rating REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS vendor_documents (id TEXT PRIMARY KEY, vendor_id TEXT NOT NULL, document_type TEXT NOT NULL, status TEXT NOT NULL, storage_key TEXT, expires_at TEXT, reviewed_by TEXT, reviewed_at TEXT, created_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS resident_requests (id TEXT PRIMARY KEY, resident_name TEXT NOT NULL, resident_email TEXT NOT NULL, resident_phone TEXT NOT NULL, community_id TEXT NOT NULL, market TEXT NOT NULL, unit TEXT NOT NULL, home_profile TEXT NOT NULL, service_name TEXT NOT NULL, preferred_window TEXT NOT NULL, board_status TEXT NOT NULL, visible_to_vendors INTEGER NOT NULL DEFAULT 1, resident_info_released INTEGER NOT NULL DEFAULT 0, requested_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS job_orders (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, vendor_id TEXT, task_status TEXT NOT NULL, service_date TEXT, schedule_confirmed_at TEXT, vendor_confirmed_at TEXT, claimed_at TEXT, schedule_due_at TEXT, payment_consult_status TEXT NOT NULL DEFAULT "Not started", resident_paid_vendor INTEGER NOT NULL DEFAULT 0, vendor_payment_confirmed INTEGER NOT NULL DEFAULT 0, resident_payment_confirmed INTEGER NOT NULL DEFAULT 0, amount_paid_cents INTEGER, payment_date TEXT, receipt_number TEXT, payment_inquiry_status TEXT, service_amount_cents INTEGER NOT NULL, flairo_fee_cents INTEGER NOT NULL, points INTEGER NOT NULL DEFAULT 0, invoice_trigger_status TEXT NOT NULL DEFAULT "Waiting", created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
@@ -825,6 +854,12 @@ async function initializeDatabase(db: D1Database) {
   ]);
   await ensureColumn(db, 'job_orders', 'claimed_at', 'TEXT');
   await ensureColumn(db, 'job_orders', 'schedule_due_at', 'TEXT');
+  await ensureColumn(db, 'vendors', 'dba_name', 'TEXT NOT NULL DEFAULT ""');
+  await ensureColumn(db, 'vendors', 'physical_address', 'TEXT NOT NULL DEFAULT ""');
+  await ensureColumn(db, 'vendors', 'service_locations', 'TEXT NOT NULL DEFAULT "[]"');
+  await ensureColumn(db, 'vendors', 'pricing_notes', 'TEXT NOT NULL DEFAULT ""');
+  await ensureColumn(db, 'vendors', 'contract_status', 'TEXT NOT NULL DEFAULT "Needs upload"');
+  await ensureColumn(db, 'vendors', 'contract_expires_at', 'TEXT');
   await ensureColumn(db, 'vendors', 'preferred_vendor', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'job_orders', 'vendor_payment_confirmed', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'job_orders', 'resident_payment_confirmed', 'INTEGER NOT NULL DEFAULT 0');
@@ -868,8 +903,8 @@ async function seedDatabase(db: D1Database) {
   );
   await db.batch(
     vendors.map((vendor) =>
-      db.prepare('INSERT INTO vendors (id, business_name, primary_contact, email, phone, markets, services, onboarding_stage, compliance_status, board_access, preferred_vendor, insurance_status, license_status, w9_status, flairo_fee_percent, rating, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(vendor.id, vendor.name, vendor.contact, vendor.email, vendor.phone, JSON.stringify(vendor.markets), JSON.stringify(vendor.services), vendor.stage, vendor.status, vendor.boardAccess ? 1 : 0, vendor.preferred ? 1 : 0, vendor.insurance, vendor.license, vendor.w9, vendor.feePercent, vendor.rating, stamp, stamp),
+      db.prepare('INSERT INTO vendors (id, business_name, dba_name, primary_contact, email, phone, physical_address, markets, service_locations, services, pricing_notes, onboarding_stage, compliance_status, board_access, preferred_vendor, insurance_status, license_status, w9_status, contract_status, contract_expires_at, flairo_fee_percent, rating, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(vendor.id, vendor.name, vendor.dbaName, vendor.contact, vendor.email, vendor.phone, vendor.physicalAddress, JSON.stringify(vendor.markets), JSON.stringify(vendor.serviceLocations), JSON.stringify(vendor.services), vendor.pricingNotes, vendor.stage, vendor.status, vendor.boardAccess ? 1 : 0, vendor.preferred ? 1 : 0, vendor.insurance, vendor.license, vendor.w9, vendor.contract, vendor.contractExpiresAt, vendor.feePercent, vendor.rating, stamp, stamp),
     ),
   );
   await db.batch(
@@ -946,6 +981,7 @@ async function readState(db: D1Database) {
   const communityRows = await db.prepare('SELECT * FROM communities ORDER BY name').all();
   const serviceRows = await db.prepare('SELECT * FROM services ORDER BY category, name').all();
   const vendorRows = await db.prepare('SELECT * FROM vendors ORDER BY business_name').all();
+  const vendorDocumentRows = await db.prepare('SELECT vendor_id, document_type, COUNT(*) as count FROM vendor_documents GROUP BY vendor_id, document_type').all();
   const jobRows = await db.prepare('SELECT r.*, j.vendor_id, j.task_status, j.service_date, j.schedule_confirmed_at, j.vendor_confirmed_at, j.claimed_at, j.schedule_due_at, j.payment_consult_status, j.resident_paid_vendor, j.vendor_payment_confirmed, j.resident_payment_confirmed, j.amount_paid_cents, j.payment_date, j.receipt_number, j.payment_inquiry_status, j.service_amount_cents, j.flairo_fee_cents, j.points, j.invoice_trigger_status FROM resident_requests r JOIN job_orders j ON j.request_id = r.id ORDER BY r.id DESC').all();
   const rewardRows = await db.prepare('SELECT * FROM reward_ledger_entries ORDER BY created_at DESC, id DESC').all();
   const invoiceRows = await db.prepare('SELECT * FROM invoice_triggers ORDER BY created_at DESC, id DESC').all();
@@ -954,6 +990,7 @@ async function readState(db: D1Database) {
   const rewardSettingsRow = await db.prepare('SELECT * FROM reward_program_settings WHERE id = ?').bind('default').first<Record<string, unknown>>();
   const liveTableHealth = await readSupabaseLiveTableHealth();
   const pendingMobileChanges = Number(mobileSyncRow?.pending_changes ?? 0);
+  const documentCounts = buildVendorDocumentCountMap(vendorDocumentRows.results);
 
   return {
     audit: auditRows.results.map((row) => ({
@@ -1063,7 +1100,16 @@ async function readState(db: D1Database) {
     })),
     vendors: vendorRows.results.map((row) => ({
       boardAccess: Boolean(row.board_access),
+      contract: String(row.contract_status ?? 'Needs upload'),
+      contractExpiresAt: row.contract_expires_at ? String(row.contract_expires_at) : null,
       contact: String(row.primary_contact),
+      dbaName: String(row.dba_name ?? ''),
+      documentCounts: {
+        contract: vendorDocumentCount(documentCounts, String(row.id), 'contract', String(row.contract_status ?? 'Needs upload')),
+        insurance: vendorDocumentCount(documentCounts, String(row.id), 'insurance', String(row.insurance_status)),
+        license: vendorDocumentCount(documentCounts, String(row.id), 'license', String(row.license_status)),
+        w9: vendorDocumentCount(documentCounts, String(row.id), 'w9', String(row.w9_status)),
+      },
       email: String(row.email),
       feePercent: Number(row.flairo_fee_percent),
       id: String(row.id),
@@ -1071,9 +1117,12 @@ async function readState(db: D1Database) {
       license: String(row.license_status),
       markets: parseJsonArray(String(row.markets)),
       name: String(row.business_name),
+      physicalAddress: String(row.physical_address ?? ''),
       phone: String(row.phone),
       preferred: Boolean(row.preferred_vendor),
+      pricingNotes: String(row.pricing_notes ?? ''),
       rating: Number(row.rating),
+      serviceLocations: parseJsonArray(String(row.service_locations ?? row.markets)),
       services: parseJsonArray(String(row.services)),
       stage: String(row.onboarding_stage),
       status: String(row.compliance_status),
@@ -1160,17 +1209,77 @@ async function pushMobileUpdate() {
   await logEvent('Mobile app push', 'mobile-app', 'Manual mobile application update completed from the FLAIRO control center.');
 }
 
+async function upsertVendor(payload: Record<string, string | number | boolean | null>) {
+  const stamp = now();
+  const existingVendorId = textPayload(payload, 'vendorId')?.trim();
+  const vendorId = existingVendorId || vendorIdFromName(textPayload(payload, 'name') ?? 'vendor');
+  const existing = await env.DB.prepare('SELECT * FROM vendors WHERE id = ?')
+    .bind(vendorId)
+    .first<Record<string, unknown>>();
+  const name = textPayload(payload, 'name')?.trim() || String(existing?.business_name ?? 'New FLAIRO Vendor');
+  const dbaName = textPayload(payload, 'dbaName')?.trim() ?? String(existing?.dba_name ?? '');
+  const contact = textPayload(payload, 'contact')?.trim() || String(existing?.primary_contact ?? 'Contact needed');
+  const email = textPayload(payload, 'email')?.trim() || String(existing?.email ?? 'vendor-email-needed@flairo.org');
+  const phone = textPayload(payload, 'phone')?.trim() || String(existing?.phone ?? 'Phone needed');
+  const physicalAddress = textPayload(payload, 'physicalAddress')?.trim() ?? String(existing?.physical_address ?? '');
+  const markets = listPayload(payload, 'marketsJson', parseJsonArray(String(existing?.markets ?? '[]')));
+  const serviceLocations = listPayload(payload, 'serviceLocationsJson', parseJsonArray(String(existing?.service_locations ?? existing?.markets ?? '[]')));
+  const services = listPayload(payload, 'servicesJson', parseJsonArray(String(existing?.services ?? '[]')));
+  const pricingNotes = textPayload(payload, 'pricingNotes')?.trim() ?? String(existing?.pricing_notes ?? '');
+  const boardAccess = booleanPayload(payload, 'boardAccess', Boolean(existing?.board_access));
+  const preferred = booleanPayload(payload, 'preferred', Boolean(existing?.preferred_vendor));
+  const feePercent = Math.max(0, numericPayload(payload, 'feePercent', Number(existing?.flairo_fee_percent ?? 10)));
+  const contractExpiresAt = textPayload(payload, 'contractExpiresAt')?.trim() || String(existing?.contract_expires_at ?? '') || null;
+  const contractUploadQueued = booleanPayload(payload, 'contractUploadQueued', false);
+  const contractStatus = contractUploadQueued ? 'Under review' : String(existing?.contract_status ?? 'Needs upload');
+  const stage = existing ? 'Profile updated by FLAIRO Admin' : 'Profile created by FLAIRO Admin';
+  const complianceStatus = boardAccess ? 'Compliant' : String(existing?.compliance_status ?? 'Pending onboarding');
+
+  if (existing) {
+    await env.DB.prepare('UPDATE vendors SET business_name = ?, dba_name = ?, primary_contact = ?, email = ?, phone = ?, physical_address = ?, markets = ?, service_locations = ?, services = ?, pricing_notes = ?, onboarding_stage = ?, compliance_status = ?, board_access = ?, preferred_vendor = ?, contract_status = ?, contract_expires_at = ?, flairo_fee_percent = ?, updated_at = ? WHERE id = ?')
+      .bind(name, dbaName, contact, email, phone, physicalAddress, JSON.stringify(markets), JSON.stringify(serviceLocations), JSON.stringify(services), pricingNotes, stage, complianceStatus, boardAccess ? 1 : 0, preferred ? 1 : 0, contractStatus, contractExpiresAt, feePercent, stamp, vendorId)
+      .run();
+  } else {
+    await env.DB.prepare('INSERT INTO vendors (id, business_name, dba_name, primary_contact, email, phone, physical_address, markets, service_locations, services, pricing_notes, onboarding_stage, compliance_status, board_access, preferred_vendor, insurance_status, license_status, w9_status, contract_status, contract_expires_at, flairo_fee_percent, rating, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(vendorId, name, dbaName, contact, email, phone, physicalAddress, JSON.stringify(markets), JSON.stringify(serviceLocations), JSON.stringify(services), pricingNotes, stage, complianceStatus, boardAccess ? 1 : 0, preferred ? 1 : 0, 'Needs upload', 'Needs upload', 'Needs upload', contractStatus, contractExpiresAt, feePercent, 0, stamp, stamp)
+      .run();
+  }
+
+  if (contractUploadQueued) {
+    await insertVendorDocument(vendorId, 'contract', 'Under review', contractExpiresAt);
+  }
+
+  await logEvent('Vendor profile', vendorId, `${name} ${existing ? 'updated' : 'created'} with ${services.length} eligible service line${services.length === 1 ? '' : 's'}.`);
+}
+
 async function recordDocumentUpload(vendorId?: string, documentType?: string) {
   if (!vendorId || !documentType) return;
   const stamp = now();
-  const column = documentType === 'license' ? 'license_status' : 'insurance_status';
+  const documentColumns: Record<string, string> = {
+    contract: 'contract_status',
+    insurance: 'insurance_status',
+    license: 'license_status',
+    w9: 'w9_status',
+  };
+  const column = documentColumns[documentType];
+  if (!column) return;
   await env.DB.prepare(`UPDATE vendors SET ${column} = ?, compliance_status = ?, onboarding_stage = ?, updated_at = ? WHERE id = ?`)
     .bind('Under review', 'Review needed', `${documentType} uploaded for review`, stamp, vendorId)
     .run();
-  await env.DB.prepare('INSERT INTO vendor_documents (id, vendor_id, document_type, status, storage_key, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .bind(`DOC-${Date.now()}`, vendorId, documentType, 'Under review', `vendor-documents/${vendorId}/${documentType}-${Date.now()}`, stamp)
-    .run();
+  await insertVendorDocument(vendorId, documentType, 'Under review');
   await logEvent('Vendor document', vendorId, `${documentType} uploaded and placed under review.`);
+}
+
+async function insertVendorDocument(
+  vendorId: string,
+  documentType: string,
+  status: string,
+  expiresAt?: string | null,
+) {
+  const stamp = now();
+  await env.DB.prepare('INSERT INTO vendor_documents (id, vendor_id, document_type, status, storage_key, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .bind(`DOC-${Date.now()}-${Math.floor(Math.random() * 1000)}`, vendorId, documentType, status, `vendor-documents/${vendorId}/${documentType}-${Date.now()}`, expiresAt ?? null, stamp)
+    .run();
 }
 
 async function approveVendor(vendorId?: string) {
@@ -1622,6 +1731,11 @@ function textPayload(payload: Record<string, string | number | boolean | null>, 
   return String(value);
 }
 
+function listPayload(payload: Record<string, string | number | boolean | null>, key: string, fallback: string[]) {
+  const value = textPayload(payload, key);
+  return value === undefined ? fallback : parseJsonArray(value);
+}
+
 function booleanPayload(payload: Record<string, string | number | boolean | null>, key: string, fallback: boolean) {
   const value = payload[key];
   if (typeof value === 'boolean') return value;
@@ -1639,6 +1753,26 @@ function dollarsFromCents(value: number) {
   return value / 100;
 }
 
+function buildVendorDocumentCountMap(rows: Record<string, unknown>[]) {
+  return rows.reduce<Record<string, Record<string, number>>>((counts, row) => {
+    const vendorId = String(row.vendor_id ?? '');
+    const documentType = String(row.document_type ?? '');
+    if (!vendorId || !documentType) return counts;
+    counts[vendorId] = counts[vendorId] ?? {};
+    counts[vendorId][documentType] = Number(row.count ?? 0);
+    return counts;
+  }, {});
+}
+
+function vendorDocumentCount(
+  counts: Record<string, Record<string, number>>,
+  vendorId: string,
+  documentType: string,
+  status: string,
+) {
+  return counts[vendorId]?.[documentType] ?? (status && status !== 'Needs upload' ? 1 : 0);
+}
+
 function parseJsonArray(value: string) {
   try {
     const parsed = JSON.parse(value);
@@ -1646,6 +1780,15 @@ function parseJsonArray(value: string) {
   } catch {
     return [];
   }
+}
+
+function vendorIdFromName(name: string) {
+  const slug = name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || `vendor-${Date.now()}`;
 }
 
 function sortVendorsForBoard(a: VendorSeed, b: VendorSeed) {
