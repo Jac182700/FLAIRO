@@ -694,6 +694,92 @@ a:focus-visible {
   align-items: center;
 }
 
+.recurring-program-control {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 14px;
+}
+
+.recurring-program-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.recurring-program-heading span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.recurring-program-heading em {
+  color: var(--gold);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.recurring-program-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.recurring-program-option {
+  min-height: 38px;
+  border: 1px solid rgba(212, 175, 55, 0.18);
+  border-radius: 8px;
+  background: rgba(212, 175, 55, 0.05);
+  padding: 8px 10px;
+}
+
+.recurring-program-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.recurring-program-add button {
+  min-height: 38px;
+}
+
+.recurring-program-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recurring-program-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  border: 1px solid rgba(247, 134, 199, 0.3);
+  border-radius: 8px;
+  background: rgba(247, 134, 199, 0.1);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  padding: 7px 8px 7px 10px;
+}
+
+.recurring-program-chip button {
+  min-height: 24px;
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--pink);
+  font-size: 11px;
+  padding: 3px 7px;
+}
+
 .partnership-profile-list {
   display: grid;
   overflow: hidden;
@@ -2586,6 +2672,8 @@ input::placeholder {
   .task-search-bar,
   .reward-filter-bar,
   .service-check-grid,
+  .recurring-program-options,
+  .recurring-program-add,
   .form-grid.two,
   .form-grid.three,
   .form-grid.four,

@@ -12,6 +12,7 @@ export const communities = sqliteTable(
     occupiedHomes: integer('occupied_homes').notNull(),
     plusEnabled: integer('plus_enabled', { mode: 'boolean' }).notNull().default(false),
     plusMembers: integer('plus_members').notNull().default(0),
+    recurringPrograms: text('recurring_programs').notNull().default('[]'),
     servicePenetration: real('service_penetration').notNull().default(0),
     netIncomeCents: integer('net_income_cents').notNull().default(0),
     statementStatus: text('statement_status').notNull().default('draft'),

@@ -57,6 +57,13 @@
       "when": 1788895453718,
       "tag": "0007_friendly_garia",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788896751510,
+      "tag": "0008_sleepy_hobgoblin",
+      "breakpoints": true
     }
   ]
 }

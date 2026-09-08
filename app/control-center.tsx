@@ -63,6 +63,7 @@ type Community = {
   homes: number;
   occupied: number;
   plusMembers: number;
+  recurringPrograms: string[];
   servicePenetration: number;
   netIncome: number;
   statementStatus: StatementStatus;
@@ -361,6 +362,7 @@ type PartnershipProfileDraft = {
   netIncome: string;
   occupied: string;
   plusMembers: string;
+  recurringPrograms: string[];
   servicePenetration: string;
 };
 
@@ -507,6 +509,7 @@ const initialCommunities: Community[] = [
     homes: 214,
     occupied: 202,
     plusMembers: 48,
+    recurringPrograms: ['Pest Share', 'Trash Valet'],
     servicePenetration: 36,
     netIncome: 1840,
     statementStatus: 'Ready',
@@ -520,6 +523,7 @@ const initialCommunities: Community[] = [
     homes: 288,
     occupied: 270,
     plusMembers: 61,
+    recurringPrograms: ['Valet Parking', 'Pest Share'],
     servicePenetration: 31,
     netIncome: 2265,
     statementStatus: 'Draft',
@@ -533,6 +537,7 @@ const initialCommunities: Community[] = [
     homes: 312,
     occupied: 297,
     plusMembers: 73,
+    recurringPrograms: ['Pest Share', 'Package Lockers'],
     servicePenetration: 44,
     netIncome: 2659.76,
     statementStatus: 'Issued',
@@ -869,6 +874,14 @@ const initialCrmAccountSettings: CrmAccountSettings = {
   supportRouting: 'info@flairo.org',
   vendorOnboardingOwner: 'Vendor Operations',
 };
+
+const recurringProgramPresets = [
+  'Valet Parking',
+  'Pest Share',
+  'Trash Valet',
+  'Package Lockers',
+  'Amenity Reservations',
+];
 
 const initialManualReconciliationRecords: ManualReconciliationRecord[] = [];
 
@@ -1918,6 +1931,7 @@ export default function ControlCenter({
     const homes = Math.max(0, Math.round(Number(draft.homes) || 0));
     const occupied = Math.max(0, Math.round(Number(draft.occupied) || homes));
     const plusMembers = Math.max(0, Math.round(Number(draft.plusMembers) || 0));
+    const recurringPrograms = normalizeRecurringPrograms(draft.recurringPrograms);
     const servicePenetration = Math.max(0, Math.min(100, Number(draft.servicePenetration) || 0));
     const netIncome = Math.max(0, Number(draft.netIncome) || 0);
     const profile: Community = {
@@ -1930,12 +1944,13 @@ export default function ControlCenter({
       netIncome,
       occupied,
       plusMembers,
+      recurringPrograms,
       servicePenetration,
       statementStatus: 'Draft',
     };
 
     setCommunities((current) => [profile, ...current]);
-    addAudit('Partnership profile', `${name} added to FLAIRO CRM setup with statement defaults in Draft.`);
+    addAudit('Partnership profile', `${name} added to FLAIRO CRM setup with ${recurringPrograms.length} recurring payout program${recurringPrograms.length === 1 ? '' : 's'}.`);
     void persistAction('create_partnership_profile', {
       address,
       homes,
@@ -1946,6 +1961,7 @@ export default function ControlCenter({
       occupied,
       plusMembers,
       profileId,
+      recurringProgramsJson: JSON.stringify(recurringPrograms),
       servicePenetration,
     });
     return true;
@@ -1980,6 +1996,7 @@ export default function ControlCenter({
     const homes = Math.max(0, Math.round(Number(draft.homes) || 0));
     const occupied = Math.max(0, Math.round(Number(draft.occupied) || homes));
     const plusMembers = Math.max(0, Math.round(Number(draft.plusMembers) || 0));
+    const recurringPrograms = normalizeRecurringPrograms(draft.recurringPrograms);
     const servicePenetration = Math.max(0, Math.min(100, Number(draft.servicePenetration) || 0));
     const netIncome = Math.max(0, Number(draft.netIncome) || 0);
 
@@ -1996,12 +2013,13 @@ export default function ControlCenter({
               netIncome,
               occupied,
               plusMembers,
+              recurringPrograms,
               servicePenetration,
             }
           : community,
       ),
     );
-    addAudit('Partnership profile', `${name} updated in FLAIRO CRM setup.`);
+    addAudit('Partnership profile', `${name} updated with ${recurringPrograms.length} recurring payout program${recurringPrograms.length === 1 ? '' : 's'}.`);
     void persistAction('update_partnership_profile', {
       address,
       homes,
@@ -2012,6 +2030,7 @@ export default function ControlCenter({
       occupied,
       plusMembers,
       profileId,
+      recurringProgramsJson: JSON.stringify(recurringPrograms),
       servicePenetration,
     });
     return true;
@@ -5583,8 +5602,10 @@ function SettingsModule({
     netIncome: '',
     occupied: '',
     plusMembers: '',
+    recurringPrograms: [],
     servicePenetration: '',
   });
+  const [customRecurringProgram, setCustomRecurringProgram] = useState('');
   const [settingsDraft, setSettingsDraft] = useState<CrmAccountSettings>(crmAccountSettings);
 
   useEffect(() => {
@@ -5594,14 +5615,40 @@ function SettingsModule({
 
   const latestAudit = audit[0];
   const readyPartnerships = communities.filter((community) => community.statementStatus === 'Ready').length;
-  const updateProfileDraft = (field: keyof PartnershipProfileDraft, value: string) => {
+  const recurringProgramOptions = useMemo(() => normalizeRecurringPrograms([
+    ...recurringProgramPresets,
+    ...services
+      .filter((service) => service.name.toLowerCase().includes('recurring'))
+      .map((service) => service.name),
+    ...communities.flatMap((community) => community.recurringPrograms ?? []),
+  ]), [communities, services]);
+  const selectedRecurringPrograms = normalizeRecurringPrograms(profileDraft.recurringPrograms);
+  const updateProfileDraft = (field: Exclude<keyof PartnershipProfileDraft, 'recurringPrograms'>, value: string) => {
     setProfileDraft((current) => ({ ...current, [field]: value }));
+  };
+  const toggleRecurringProgram = (program: string, checked: boolean) => {
+    setProfileDraft((current) => {
+      const programs = checked
+        ? normalizeRecurringPrograms([...current.recurringPrograms, program])
+        : current.recurringPrograms.filter((item) => item.trim().toLowerCase() !== program.trim().toLowerCase());
+      return { ...current, recurringPrograms: programs };
+    });
+  };
+  const addCustomRecurringProgram = () => {
+    const program = customRecurringProgram.trim();
+    if (!program) return;
+    setProfileDraft((current) => ({
+      ...current,
+      recurringPrograms: normalizeRecurringPrograms([...current.recurringPrograms, program]),
+    }));
+    setCustomRecurringProgram('');
   };
   const updateSettingsDraft = (field: keyof CrmAccountSettings, value: string) => {
     setSettingsDraft((current) => ({ ...current, [field]: value }));
   };
   const resetProfileDraft = (manager = profileDraft.manager || 'RISE Residential Management') => {
     setEditingProfileId(null);
+    setCustomRecurringProgram('');
     setProfileDraft({
       address: '',
       homes: '',
@@ -5611,11 +5658,13 @@ function SettingsModule({
       netIncome: '',
       occupied: '',
       plusMembers: '',
+      recurringPrograms: [],
       servicePenetration: '',
     });
   };
   const startProfileEdit = (community: Community) => {
     setEditingProfileId(community.id);
+    setCustomRecurringProgram('');
     setProfileDraft({
       address: community.address,
       homes: String(community.homes),
@@ -5625,6 +5674,7 @@ function SettingsModule({
       netIncome: String(community.netIncome),
       occupied: String(community.occupied),
       plusMembers: String(community.plusMembers),
+      recurringPrograms: normalizeRecurringPrograms(community.recurringPrograms ?? []),
       servicePenetration: String(community.servicePenetration),
     });
   };
@@ -5707,6 +5757,54 @@ function SettingsModule({
               Service penetration
               <input inputMode="decimal" value={profileDraft.servicePenetration} onChange={(event) => updateProfileDraft('servicePenetration', event.target.value)} placeholder="0 to 100" />
             </label>
+            <div className="recurring-program-control">
+              <div className="recurring-program-heading">
+                <span>Recurring monthly service programs</span>
+                <em>Included payout programs</em>
+              </div>
+              <div className="recurring-program-options">
+                {recurringProgramOptions.map((program) => (
+                  <label className="check-control recurring-program-option" key={program}>
+                    <input
+                      checked={selectedRecurringPrograms.some((item) => item.toLowerCase() === program.toLowerCase())}
+                      onChange={(event) => toggleRecurringProgram(program, event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>{program}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="recurring-program-add">
+                <input
+                  aria-label="Add recurring program"
+                  onChange={(event) => setCustomRecurringProgram(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter') return;
+                    event.preventDefault();
+                    addCustomRecurringProgram();
+                  }}
+                  placeholder="Add product or service"
+                  value={customRecurringProgram}
+                />
+                <button className="secondary-action" onClick={addCustomRecurringProgram} type="button">
+                  Add program
+                </button>
+              </div>
+              {selectedRecurringPrograms.length ? (
+                <div className="recurring-program-selected" aria-label="Selected recurring programs">
+                  {selectedRecurringPrograms.map((program) => (
+                    <span className="recurring-program-chip" key={program}>
+                      {program}
+                      <button aria-label={`Remove ${program}`} onClick={() => toggleRecurringProgram(program, false)} type="button">
+                        Remove
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-note">No recurring programs selected.</p>
+              )}
+            </div>
             <div className="setup-form-actions">
               <button type="submit">{editingProfileId ? 'Save partnership profile' : 'Add partnership profile'}</button>
               {editingProfileId && (
@@ -5785,6 +5883,7 @@ function SettingsModule({
               <span>
                 {community.name}
                 <em>{community.market} / {community.manager}</em>
+                <em>{(community.recurringPrograms ?? []).length ? `Programs: ${(community.recurringPrograms ?? []).join(', ')}` : 'Programs: Not set'}</em>
               </span>
               <strong>{community.statementStatus}</strong>
               <span>{community.plusMembers} PLUS</span>
@@ -6695,4 +6794,15 @@ function vendorName(vendorId: string, vendors: Vendor[]) {
 
 function communityName(communityId: string, communities: Community[]) {
   return communities.find((community) => community.id === communityId)?.name ?? 'Community not set';
+}
+
+function normalizeRecurringPrograms(programs: string[]) {
+  const seen = new Set<string>();
+  return programs.reduce<string[]>((list, program) => {
+    const normalized = program.trim().replace(/\s+/g, ' ');
+    const key = normalized.toLowerCase();
+    if (!normalized || seen.has(key)) return list;
+    seen.add(key);
+    return [...list, normalized];
+  }, []);
 }

@@ -22,6 +22,7 @@ type CommunitySeed = {
   homes: number;
   occupied: number;
   plusMembers: number;
+  recurringPrograms: string[];
   servicePenetration: number;
   netIncome: number;
   statementStatus: string;
@@ -240,6 +241,7 @@ const communities: CommunitySeed[] = [
     homes: 214,
     occupied: 202,
     plusMembers: 48,
+    recurringPrograms: ['Pest Share', 'Trash Valet'],
     servicePenetration: 36,
     netIncome: 1840,
     statementStatus: 'Ready',
@@ -253,6 +255,7 @@ const communities: CommunitySeed[] = [
     homes: 288,
     occupied: 270,
     plusMembers: 61,
+    recurringPrograms: ['Valet Parking', 'Pest Share'],
     servicePenetration: 31,
     netIncome: 2265,
     statementStatus: 'Draft',
@@ -266,6 +269,7 @@ const communities: CommunitySeed[] = [
     homes: 312,
     occupied: 297,
     plusMembers: 73,
+    recurringPrograms: ['Pest Share', 'Package Lockers'],
     servicePenetration: 44,
     netIncome: 2659.76,
     statementStatus: 'Issued',
@@ -917,7 +921,7 @@ export async function POST(request: Request) {
 
 async function initializeDatabase(db: D1Database) {
   await db.batch([
-    db.prepare('CREATE TABLE IF NOT EXISTS communities (id TEXT PRIMARY KEY, name TEXT NOT NULL, market TEXT NOT NULL, address TEXT NOT NULL, property_manager TEXT NOT NULL, homes INTEGER NOT NULL, occupied_homes INTEGER NOT NULL, plus_enabled INTEGER NOT NULL DEFAULT 0, plus_members INTEGER NOT NULL DEFAULT 0, service_penetration REAL NOT NULL DEFAULT 0, net_income_cents INTEGER NOT NULL DEFAULT 0, statement_status TEXT NOT NULL DEFAULT "Draft", created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
+    db.prepare('CREATE TABLE IF NOT EXISTS communities (id TEXT PRIMARY KEY, name TEXT NOT NULL, market TEXT NOT NULL, address TEXT NOT NULL, property_manager TEXT NOT NULL, homes INTEGER NOT NULL, occupied_homes INTEGER NOT NULL, plus_enabled INTEGER NOT NULL DEFAULT 0, plus_members INTEGER NOT NULL DEFAULT 0, service_penetration REAL NOT NULL DEFAULT 0, net_income_cents INTEGER NOT NULL DEFAULT 0, statement_status TEXT NOT NULL DEFAULT "Draft", recurring_programs TEXT NOT NULL DEFAULT "[]", created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS services (id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, mobile_visible INTEGER NOT NULL DEFAULT 1, standard_price_cents INTEGER NOT NULL, plus_price_cents INTEGER NOT NULL, points_rule TEXT NOT NULL, vendor_pool_rule TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS vendors (id TEXT PRIMARY KEY, business_name TEXT NOT NULL, dba_name TEXT NOT NULL DEFAULT "", primary_contact TEXT NOT NULL, email TEXT NOT NULL, phone TEXT NOT NULL, physical_address TEXT NOT NULL DEFAULT "", markets TEXT NOT NULL, service_locations TEXT NOT NULL DEFAULT "[]", services TEXT NOT NULL, pricing_notes TEXT NOT NULL DEFAULT "", onboarding_stage TEXT NOT NULL, compliance_status TEXT NOT NULL, board_access INTEGER NOT NULL DEFAULT 0, preferred_vendor INTEGER NOT NULL DEFAULT 0, insurance_status TEXT NOT NULL DEFAULT "Needs upload", license_status TEXT NOT NULL DEFAULT "Needs upload", w9_status TEXT NOT NULL DEFAULT "Needs upload", contract_status TEXT NOT NULL DEFAULT "Needs upload", contract_expires_at TEXT, flairo_fee_percent REAL NOT NULL DEFAULT 10, rating REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS vendor_documents (id TEXT PRIMARY KEY, vendor_id TEXT NOT NULL, document_type TEXT NOT NULL, status TEXT NOT NULL, storage_key TEXT, file_name TEXT, file_type TEXT, file_size INTEGER NOT NULL DEFAULT 0, expires_at TEXT, reviewed_by TEXT, reviewed_at TEXT, created_at TEXT NOT NULL)'),
@@ -966,6 +970,7 @@ async function initializeDatabase(db: D1Database) {
   await ensureColumn(db, 'reward_ledger_entries', 'alert_queued', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'reward_ledger_entries', 'redeemed_in_expiration_window', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'invoice_triggers', 'billing_period', 'TEXT');
+  await ensureColumn(db, 'communities', 'recurring_programs', 'TEXT NOT NULL DEFAULT "[]"');
   await db.prepare('UPDATE vendors SET preferred_vendor = 1 WHERE id IN (?, ?)')
     .bind('sparkle', 'porter')
     .run();
@@ -987,8 +992,8 @@ async function seedDatabase(db: D1Database) {
 
   await db.batch(
     communities.map((community) =>
-      db.prepare('INSERT INTO communities (id, name, market, address, property_manager, homes, occupied_homes, plus_enabled, plus_members, service_penetration, net_income_cents, statement_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(community.id, community.name, community.market, community.address, community.manager, community.homes, community.occupied, 1, community.plusMembers, community.servicePenetration, cents(community.netIncome), community.statementStatus, stamp, stamp),
+      db.prepare('INSERT INTO communities (id, name, market, address, property_manager, homes, occupied_homes, plus_enabled, plus_members, service_penetration, net_income_cents, statement_status, recurring_programs, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(community.id, community.name, community.market, community.address, community.manager, community.homes, community.occupied, 1, community.plusMembers, community.servicePenetration, cents(community.netIncome), community.statementStatus, JSON.stringify(community.recurringPrograms), stamp, stamp),
     ),
   );
   await db.batch(
@@ -1108,6 +1113,7 @@ async function readState(db: D1Database) {
       netIncome: dollarsFromCents(Number(row.net_income_cents)),
       occupied: Number(row.occupied_homes),
       plusMembers: Number(row.plus_members),
+      recurringPrograms: normalizeTextList(parseJsonArray(String(row.recurring_programs ?? '[]'))),
       servicePenetration: Number(row.service_penetration),
       statementStatus: String(row.statement_status),
     })),
@@ -1410,13 +1416,14 @@ async function createPartnershipProfile(payload: ActionPayload) {
   const homes = Math.max(0, Math.round(numericPayload(payload, 'homes', 0)));
   const occupied = Math.max(0, Math.round(numericPayload(payload, 'occupied', homes)));
   const plusMembers = Math.max(0, Math.round(numericPayload(payload, 'plusMembers', 0)));
+  const recurringPrograms = normalizeTextList(listPayload(payload, 'recurringProgramsJson', []));
   const servicePenetration = Math.max(0, Math.min(100, numericPayload(payload, 'servicePenetration', 0)));
   const netIncomeCents = cents(Math.max(0, numericPayload(payload, 'netIncome', 0)));
 
-  await env.DB.prepare('INSERT OR IGNORE INTO communities (id, name, market, address, property_manager, homes, occupied_homes, plus_enabled, plus_members, service_penetration, net_income_cents, statement_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(profileId, name, market, address, manager, homes, occupied, 1, plusMembers, servicePenetration, netIncomeCents, 'Draft', stamp, stamp)
+  await env.DB.prepare('INSERT OR IGNORE INTO communities (id, name, market, address, property_manager, homes, occupied_homes, plus_enabled, plus_members, service_penetration, net_income_cents, statement_status, recurring_programs, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(profileId, name, market, address, manager, homes, occupied, 1, plusMembers, servicePenetration, netIncomeCents, 'Draft', JSON.stringify(recurringPrograms), stamp, stamp)
     .run();
-  await logEvent('Partnership profile', profileId, `${name} added to FLAIRO CRM setup with statement defaults in Draft.`);
+  await logEvent('Partnership profile', profileId, `${name} added to FLAIRO CRM setup with ${recurringPrograms.length} recurring payout program${recurringPrograms.length === 1 ? '' : 's'}.`);
 }
 
 async function updatePartnershipProfile(payload: ActionPayload) {
@@ -1431,13 +1438,14 @@ async function updatePartnershipProfile(payload: ActionPayload) {
   const homes = Math.max(0, Math.round(numericPayload(payload, 'homes', 0)));
   const occupied = Math.max(0, Math.round(numericPayload(payload, 'occupied', homes)));
   const plusMembers = Math.max(0, Math.round(numericPayload(payload, 'plusMembers', 0)));
+  const recurringPrograms = normalizeTextList(listPayload(payload, 'recurringProgramsJson', []));
   const servicePenetration = Math.max(0, Math.min(100, numericPayload(payload, 'servicePenetration', 0)));
   const netIncomeCents = cents(Math.max(0, numericPayload(payload, 'netIncome', 0)));
 
-  await env.DB.prepare('UPDATE communities SET name = ?, market = ?, address = ?, property_manager = ?, homes = ?, occupied_homes = ?, plus_members = ?, service_penetration = ?, net_income_cents = ?, updated_at = ? WHERE id = ?')
-    .bind(name, market, address, manager, homes, occupied, plusMembers, servicePenetration, netIncomeCents, stamp, profileId)
+  await env.DB.prepare('UPDATE communities SET name = ?, market = ?, address = ?, property_manager = ?, homes = ?, occupied_homes = ?, plus_members = ?, recurring_programs = ?, service_penetration = ?, net_income_cents = ?, updated_at = ? WHERE id = ?')
+    .bind(name, market, address, manager, homes, occupied, plusMembers, JSON.stringify(recurringPrograms), servicePenetration, netIncomeCents, stamp, profileId)
     .run();
-  await logEvent('Partnership profile', profileId, `${name} updated in FLAIRO CRM setup.`);
+  await logEvent('Partnership profile', profileId, `${name} updated with ${recurringPrograms.length} recurring payout program${recurringPrograms.length === 1 ? '' : 's'}.`);
 }
 
 async function deletePartnershipProfile(profileId?: string) {
@@ -2227,6 +2235,17 @@ function parseJsonArray(value: string) {
   } catch {
     return [];
   }
+}
+
+function normalizeTextList(values: string[]) {
+  const seen = new Set<string>();
+  return values.reduce<string[]>((list, value) => {
+    const normalized = value.trim().replace(/\s+/g, ' ');
+    const key = normalized.toLowerCase();
+    if (!normalized || seen.has(key)) return list;
+    seen.add(key);
+    return [...list, normalized];
+  }, []);
 }
 
 function dataUrlToArrayBuffer(value: string) {
