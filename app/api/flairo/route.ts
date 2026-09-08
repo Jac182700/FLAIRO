@@ -796,6 +796,14 @@ export async function POST(request: Request) {
         await createPartnershipProfile(payload);
         stageMobileChange = true;
         break;
+      case 'update_partnership_profile':
+        await updatePartnershipProfile(payload);
+        stageMobileChange = true;
+        break;
+      case 'delete_partnership_profile':
+        await deletePartnershipProfile(textPayload(payload, 'profileId'));
+        stageMobileChange = true;
+        break;
       case 'update_crm_account_settings':
         await updateCrmAccountSettings(payload);
         stageMobileChange = true;
@@ -1387,6 +1395,40 @@ async function createPartnershipProfile(payload: ActionPayload) {
     .bind(profileId, name, market, address, manager, homes, occupied, 1, plusMembers, servicePenetration, netIncomeCents, 'Draft', stamp, stamp)
     .run();
   await logEvent('Partnership profile', profileId, `${name} added to FLAIRO CRM setup with statement defaults in Draft.`);
+}
+
+async function updatePartnershipProfile(payload: ActionPayload) {
+  const profileId = textPayload(payload, 'profileId')?.trim();
+  const name = textPayload(payload, 'name')?.trim();
+  const market = textPayload(payload, 'market')?.trim();
+  const address = textPayload(payload, 'address')?.trim();
+  const manager = textPayload(payload, 'manager')?.trim();
+  if (!profileId || !name || !market || !address || !manager) return;
+
+  const stamp = now();
+  const homes = Math.max(0, Math.round(numericPayload(payload, 'homes', 0)));
+  const occupied = Math.max(0, Math.round(numericPayload(payload, 'occupied', homes)));
+  const plusMembers = Math.max(0, Math.round(numericPayload(payload, 'plusMembers', 0)));
+  const servicePenetration = Math.max(0, Math.min(100, numericPayload(payload, 'servicePenetration', 0)));
+  const netIncomeCents = cents(Math.max(0, numericPayload(payload, 'netIncome', 0)));
+
+  await env.DB.prepare('UPDATE communities SET name = ?, market = ?, address = ?, property_manager = ?, homes = ?, occupied_homes = ?, plus_members = ?, service_penetration = ?, net_income_cents = ?, updated_at = ? WHERE id = ?')
+    .bind(name, market, address, manager, homes, occupied, plusMembers, servicePenetration, netIncomeCents, stamp, profileId)
+    .run();
+  await logEvent('Partnership profile', profileId, `${name} updated in FLAIRO CRM setup.`);
+}
+
+async function deletePartnershipProfile(profileId?: string) {
+  if (!profileId) return;
+  const profile = await env.DB.prepare('SELECT name FROM communities WHERE id = ? LIMIT 1')
+    .bind(profileId)
+    .first<{ name: string }>();
+  if (!profile) return;
+
+  await env.DB.prepare('DELETE FROM communities WHERE id = ?')
+    .bind(profileId)
+    .run();
+  await logEvent('Partnership profile deleted', profileId, `${profile.name} removed from FLAIRO CRM setup.`);
 }
 
 async function updateCrmAccountSettings(payload: ActionPayload) {

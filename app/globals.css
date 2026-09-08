@@ -683,6 +683,17 @@ a:focus-visible {
   justify-self: start;
 }
 
+.setup-form-actions,
+.partnership-profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.setup-form-actions {
+  align-items: center;
+}
+
 .partnership-profile-list {
   display: grid;
   overflow: hidden;
@@ -692,12 +703,16 @@ a:focus-visible {
 
 .partnership-profile-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(88px, 0.25fr) minmax(90px, 0.25fr) minmax(90px, 0.25fr);
+  grid-template-columns: minmax(220px, 1fr) minmax(88px, 0.22fr) minmax(90px, 0.22fr) minmax(90px, 0.24fr) minmax(132px, 0.35fr);
   align-items: center;
   gap: 12px;
   border-top: 1px solid var(--line-soft);
   color: var(--muted);
   padding: 12px 14px;
+}
+
+.partnership-profile-row.editing {
+  background: rgba(247, 134, 199, 0.08);
 }
 
 .partnership-profile-row:first-child {
@@ -719,6 +734,16 @@ a:focus-visible {
   color: var(--muted);
   font-size: 12px;
   font-style: normal;
+}
+
+.partnership-profile-actions {
+  justify-content: flex-end;
+}
+
+.partnership-profile-actions button,
+.setup-form-actions .secondary-action {
+  min-height: 36px;
+  padding: 8px 10px;
 }
 
 .audit-panel {
@@ -2473,6 +2498,10 @@ input::placeholder {
   .open-statement-head strong,
   .open-statement-item strong {
     text-align: left;
+  }
+
+  .partnership-profile-actions {
+    justify-content: flex-start;
   }
 
   .audit-toggle {

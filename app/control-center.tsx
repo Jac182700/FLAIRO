@@ -1912,6 +1912,67 @@ export default function ControlCenter({
     });
   };
 
+  const updatePartnershipProfile = (profileId: string, draft: PartnershipProfileDraft) => {
+    const name = draft.name.trim();
+    const market = draft.market.trim();
+    const address = draft.address.trim();
+    const manager = draft.manager.trim();
+    if (!profileId || !name || !market || !address || !manager) {
+      addAudit('Partnership profile waiting', 'Partnership name, market, address, and account owner are required.');
+      return false;
+    }
+
+    const homes = Math.max(0, Math.round(Number(draft.homes) || 0));
+    const occupied = Math.max(0, Math.round(Number(draft.occupied) || homes));
+    const plusMembers = Math.max(0, Math.round(Number(draft.plusMembers) || 0));
+    const servicePenetration = Math.max(0, Math.min(100, Number(draft.servicePenetration) || 0));
+    const netIncome = Math.max(0, Number(draft.netIncome) || 0);
+
+    setCommunities((current) =>
+      current.map((community) =>
+        community.id === profileId
+          ? {
+              ...community,
+              address,
+              homes,
+              manager,
+              market,
+              name,
+              netIncome,
+              occupied,
+              plusMembers,
+              servicePenetration,
+            }
+          : community,
+      ),
+    );
+    addAudit('Partnership profile', `${name} updated in FLAIRO CRM setup.`);
+    void persistAction('update_partnership_profile', {
+      address,
+      homes,
+      manager,
+      market,
+      name,
+      netIncome,
+      occupied,
+      plusMembers,
+      profileId,
+      servicePenetration,
+    });
+    return true;
+  };
+
+  const deletePartnershipProfile = (profileId: string) => {
+    const profile = communities.find((community) => community.id === profileId);
+    if (!profile) return;
+    setCommunities((current) => current.filter((community) => community.id !== profileId));
+    addAudit('Partnership profile deleted', `${profile.name} removed from FLAIRO CRM setup.`);
+    void persistAction('delete_partnership_profile', {
+      name: profile.name,
+      profileId,
+    });
+  };
+
   const adminAdjustPlumePoints = (draft: RewardAdjustmentDraft) => {
     const points = Math.round(Number(draft.points));
     if (!draft.resident.trim() || !points || !draft.communityId) {
@@ -2247,8 +2308,10 @@ export default function ControlCenter({
             communities={communities}
             createPartnershipProfile={createPartnershipProfile}
             crmAccountSettings={crmAccountSettings}
+            deletePartnershipProfile={deletePartnershipProfile}
             saveCrmAccountSettings={saveCrmAccountSettings}
             services={services}
+            updatePartnershipProfile={updatePartnershipProfile}
             vendors={vendors}
           />
         )}
@@ -4972,19 +5035,24 @@ function SettingsModule({
   communities,
   createPartnershipProfile,
   crmAccountSettings,
+  deletePartnershipProfile,
   saveCrmAccountSettings,
   services,
+  updatePartnershipProfile,
   vendors,
 }: {
   audit: AuditEntry[];
   communities: Community[];
   createPartnershipProfile: (draft: PartnershipProfileDraft) => boolean;
   crmAccountSettings: CrmAccountSettings;
+  deletePartnershipProfile: (profileId: string) => void;
   saveCrmAccountSettings: (settings: CrmAccountSettings) => void;
   services: Service[];
+  updatePartnershipProfile: (profileId: string, draft: PartnershipProfileDraft) => boolean;
   vendors: Vendor[];
 }) {
   const [auditExpanded, setAuditExpanded] = useState(false);
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [profileDraft, setProfileDraft] = useState<PartnershipProfileDraft>({
     address: '',
     homes: '',
@@ -5011,14 +5079,12 @@ function SettingsModule({
   const updateSettingsDraft = (field: keyof CrmAccountSettings, value: string) => {
     setSettingsDraft((current) => ({ ...current, [field]: value }));
   };
-  const submitProfile = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const profileCreated = createPartnershipProfile(profileDraft);
-    if (!profileCreated) return;
+  const resetProfileDraft = (manager = profileDraft.manager || 'RISE Residential Management') => {
+    setEditingProfileId(null);
     setProfileDraft({
       address: '',
       homes: '',
-      manager: profileDraft.manager || 'RISE Residential Management',
+      manager,
       market: '',
       name: '',
       netIncome: '',
@@ -5026,6 +5092,34 @@ function SettingsModule({
       plusMembers: '',
       servicePenetration: '',
     });
+  };
+  const startProfileEdit = (community: Community) => {
+    setEditingProfileId(community.id);
+    setProfileDraft({
+      address: community.address,
+      homes: String(community.homes),
+      manager: community.manager,
+      market: community.market,
+      name: community.name,
+      netIncome: String(community.netIncome),
+      occupied: String(community.occupied),
+      plusMembers: String(community.plusMembers),
+      servicePenetration: String(community.servicePenetration),
+    });
+  };
+  const submitProfile = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const profileSaved = editingProfileId
+      ? updatePartnershipProfile(editingProfileId, profileDraft)
+      : createPartnershipProfile(profileDraft);
+    if (!profileSaved) return;
+    resetProfileDraft();
+  };
+  const deleteProfile = (community: Community) => {
+    const confirmed = window.confirm(`Delete ${community.name} from partnership profiles?`);
+    if (!confirmed) return;
+    deletePartnershipProfile(community.id);
+    if (editingProfileId === community.id) resetProfileDraft();
   };
 
   return (
@@ -5050,7 +5144,7 @@ function SettingsModule({
           <form className="setup-form" onSubmit={submitProfile}>
             <div>
               <p className="eyebrow">Partnership profiles</p>
-              <h3>Add profile</h3>
+              <h3>{editingProfileId ? 'Edit profile' : 'Add profile'}</h3>
             </div>
             <div className="form-grid two">
               <label>
@@ -5092,7 +5186,14 @@ function SettingsModule({
               Service penetration
               <input inputMode="decimal" value={profileDraft.servicePenetration} onChange={(event) => updateProfileDraft('servicePenetration', event.target.value)} placeholder="0 to 100" />
             </label>
-            <button type="submit">Add partnership profile</button>
+            <div className="setup-form-actions">
+              <button type="submit">{editingProfileId ? 'Save partnership profile' : 'Add partnership profile'}</button>
+              {editingProfileId && (
+                <button className="secondary-action" onClick={() => resetProfileDraft()} type="button">
+                  Cancel edit
+                </button>
+              )}
+            </div>
           </form>
 
           <form
@@ -5159,7 +5260,7 @@ function SettingsModule({
 
         <div className="partnership-profile-list" aria-label="Active partnership profiles">
           {communities.map((community) => (
-            <div className="partnership-profile-row" key={community.id}>
+            <div className={`partnership-profile-row ${editingProfileId === community.id ? 'editing' : ''}`} key={community.id}>
               <span>
                 {community.name}
                 <em>{community.market} / {community.manager}</em>
@@ -5167,6 +5268,14 @@ function SettingsModule({
               <strong>{community.statementStatus}</strong>
               <span>{community.plusMembers} PLUS</span>
               <span>{dollars(community.netIncome)}</span>
+              <span className="partnership-profile-actions">
+                <button className="secondary-action" onClick={() => startProfileEdit(community)} type="button">
+                  Edit
+                </button>
+                <button className="danger-action" onClick={() => deleteProfile(community)} type="button">
+                  Delete
+                </button>
+              </span>
             </div>
           ))}
         </div>
