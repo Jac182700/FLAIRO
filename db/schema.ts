@@ -239,6 +239,27 @@ export const invoiceTriggers = sqliteTable(
   ],
 );
 
+export const manualReconciliationRecords = sqliteTable(
+  'manual_reconciliation_records',
+  {
+    id: text('id').primaryKey(),
+    type: text('type').notNull(),
+    item: text('item').notNull(),
+    property: text('property').notNull().default(''),
+    vendorId: text('vendor_id').notNull().references(() => vendors.id),
+    partner: text('partner').notNull().default(''),
+    program: text('program').notNull().default(''),
+    servicePeriod: text('service_period').notNull(),
+    billingPeriod: text('billing_period').notNull(),
+    status: text('status').notNull().default('Open'),
+    amountCents: integer('amount_cents').notNull().default(0),
+    suggestedAction: text('suggested_action').notNull().default(''),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [index('idx_manual_reconciliation_vendor_period').on(table.vendorId, table.billingPeriod, table.status)],
+);
+
 export const mobileSyncState = sqliteTable(
   'mobile_sync_state',
   {

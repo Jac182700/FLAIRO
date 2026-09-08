@@ -219,6 +219,22 @@ type ReconciliationItem = {
   amount: number;
 };
 
+type ManualReconciliationRecord = {
+  id: string;
+  type: string;
+  item: string;
+  property: string;
+  vendorId: string;
+  partner: string;
+  program: string;
+  servicePeriod: string;
+  billingMonth: string;
+  status: string;
+  amount: number;
+  suggestedAction: string;
+  createdAt: string;
+};
+
 type AuditEntry = {
   id: string;
   action: string;
@@ -302,6 +318,16 @@ type RewardAdjustmentDraft = {
   note: string;
 };
 
+type ManualReconciliationDraft = {
+  amount: string;
+  item: string;
+  note: string;
+  property: string;
+  servicePeriod: string;
+  type: string;
+  vendorId: string;
+};
+
 type PartnershipProfileDraft = {
   address: string;
   homes: string;
@@ -342,6 +368,7 @@ type FlairoState = {
   crmAccountSettings: CrmAccountSettings;
   invoices: InvoiceTrigger[];
   jobs: Job[];
+  manualReconciliationRecords: ManualReconciliationRecord[];
   mobileSync: MobileSync;
   rewards: RewardEntry[];
   rewardSettings: RewardSettings;
@@ -819,6 +846,8 @@ const initialCrmAccountSettings: CrmAccountSettings = {
   vendorOnboardingOwner: 'Vendor Operations',
 };
 
+const initialManualReconciliationRecords: ManualReconciliationRecord[] = [];
+
 const initialInvoices: InvoiceTrigger[] = [
   {
     id: 'INV-Q-2208',
@@ -1045,6 +1074,7 @@ export default function ControlCenter({
   const [rewardSettings, setRewardSettings] = useState<RewardSettings>(initialRewardSettings);
   const [crmAccountSettings, setCrmAccountSettings] = useState<CrmAccountSettings>(initialCrmAccountSettings);
   const [invoices, setInvoices] = useState<InvoiceTrigger[]>(initialInvoices);
+  const [manualReconciliationRecords, setManualReconciliationRecords] = useState<ManualReconciliationRecord[]>(initialManualReconciliationRecords);
   const [communities, setCommunities] = useState<Community[]>(initialCommunities);
   const [audit, setAudit] = useState<AuditEntry[]>(initialAudit);
   const [mobileSync, setMobileSync] = useState<MobileSync>(initialMobileSync);
@@ -1071,6 +1101,7 @@ export default function ControlCenter({
     if (state.crmAccountSettings) setCrmAccountSettings(state.crmAccountSettings);
     if (state.invoices) setInvoices(state.invoices);
     if (state.jobs) setJobs(state.jobs);
+    if (state.manualReconciliationRecords) setManualReconciliationRecords(state.manualReconciliationRecords);
     if (state.mobileSync) setMobileSync(state.mobileSync);
     if (state.rewards) setRewards(state.rewards);
     if (state.rewardSettings) setRewardSettings(state.rewardSettings);
@@ -1181,7 +1212,7 @@ export default function ControlCenter({
     const rewardLiability = rewards
       .filter((entry) => entry.status === 'Pending')
       .reduce((sum, entry) => sum + plumePointValue(entry.points, rewardSettings), 0);
-    const accountingQueue = buildReconciliationItems(jobs, invoices, communities, vendors).length;
+    const accountingQueue = buildReconciliationItems(jobs, invoices, communities, vendors, manualReconciliationRecords).length;
 
     return [
       { id: 'metric-board-jobs', label: 'Vendor-visible jobs', value: String(openBoard), detail: 'Open resident requests' },
@@ -1191,7 +1222,7 @@ export default function ControlCenter({
       { id: 'metric-invoice-queue', label: 'Reconciliation queue', value: String(accountingQueue), detail: 'Open accounting items remain visible until resolved' },
       { id: 'metric-plus-memberships', label: 'PLUS memberships', value: '182', detail: 'Across active communities' },
     ];
-  }, [communities, invoices, jobs, rewardSettings, rewards, vendors]);
+  }, [communities, invoices, jobs, manualReconciliationRecords, rewardSettings, rewards, vendors]);
 
   const addAudit = (action: string, detail: string) => {
     setAudit((current) => [
@@ -2101,6 +2132,50 @@ export default function ControlCenter({
     });
   };
 
+  const addManualReconciliationRecord = (draft: ManualReconciliationDraft) => {
+    const vendor = vendors.find((item) => item.id === draft.vendorId);
+    const item = draft.item.trim();
+    if (!item || !vendor) {
+      addAudit('Reconciliation record waiting', 'A record description and processing vendor are required before adding to month-end.');
+      return false;
+    }
+
+    const servicePeriod = /^\d{4}-\d{2}$/.test(draft.servicePeriod) ? draft.servicePeriod : currentMonthKey();
+    const amount = Math.max(0, Number(draft.amount) || 0);
+    const record: ManualReconciliationRecord = {
+      amount,
+      billingMonth: servicePeriod,
+      createdAt: new Date().toISOString(),
+      id: `MR-${Date.now()}`,
+      item,
+      partner: vendor.name,
+      program: 'Manual month-end report',
+      property: draft.property.trim() || 'Month-end report',
+      servicePeriod,
+      status: 'Open',
+      suggestedAction: draft.note.trim() || `Apply to ${vendor.name} for month-end processing`,
+      type: draft.type || 'Manual Month-End Record',
+      vendorId: vendor.id,
+    };
+
+    setManualReconciliationRecords((current) => [record, ...current]);
+    addAudit('Reconciliation record added', `${record.item} added to ${labelMonth(servicePeriod)} month-end processing for ${vendor.name}.`);
+    void persistAction('add_manual_reconciliation_record', {
+      amount,
+      billingMonth: servicePeriod,
+      createdAt: record.createdAt,
+      item: record.item,
+      note: record.suggestedAction,
+      partner: record.partner,
+      property: record.property,
+      recordId: record.id,
+      servicePeriod,
+      type: record.type,
+      vendorId: record.vendorId,
+    });
+    return true;
+  };
+
   const pushMobileUpdate = async () => {
     setMobilePushStatus('Pushing updates');
     setSyncStatus('Pushing staged updates to mobile app');
@@ -2281,12 +2356,14 @@ export default function ControlCenter({
 
         {activeModule === 'accounting' && (
           <AccountingModule
+            addManualReconciliationRecord={addManualReconciliationRecord}
             communities={communities}
             finalizePartnershipStatement={finalizePartnershipStatement}
             finalizeVendorInvoice={finalizeVendorInvoice}
             invoices={invoices}
             jobs={jobs}
             highlightRecordId={activeModule === 'accounting' ? focusTarget?.recordId : null}
+            manualReconciliationRecords={manualReconciliationRecords}
             markVendorStatementPaid={markVendorStatementPaid}
             rewards={rewards}
             vendors={vendors}
@@ -4160,28 +4237,32 @@ function RewardsModule({
 }
 
 function AccountingModule({
+  addManualReconciliationRecord,
   communities,
   finalizePartnershipStatement,
   finalizeVendorInvoice,
   highlightRecordId,
   invoices,
   jobs,
+  manualReconciliationRecords,
   markVendorStatementPaid,
   rewards,
   vendors,
 }: {
+  addManualReconciliationRecord: (draft: ManualReconciliationDraft) => boolean;
   communities: Community[];
   finalizePartnershipStatement: (communityId: string, monthKey: string, programIds: string[], reviewAcknowledged: boolean) => void;
   finalizeVendorInvoice: (vendorId: string, monthKey: string, jobIds: string[], reviewAcknowledged: boolean) => void;
   highlightRecordId?: string | null;
   invoices: InvoiceTrigger[];
   jobs: Job[];
+  manualReconciliationRecords: ManualReconciliationRecord[];
   markVendorStatementPaid: (vendorId: string, monthKey: string) => void;
   rewards: RewardEntry[];
   vendors: Vendor[];
 }) {
   const [activeTab, setActiveTab] = useState<AccountingTab>(() => accountingTabFromHighlight(highlightRecordId));
-  const reconciliationItems = buildReconciliationItems(jobs, invoices, communities, vendors);
+  const reconciliationItems = buildReconciliationItems(jobs, invoices, communities, vendors, manualReconciliationRecords);
   const openStatements = buildOpenVendorStatements(invoices, jobs, vendors);
   const recommendedJobs = jobs.filter(jobRecommendedForReconciliation).length;
   const reviewJobs = jobs.filter((job) => job.vendorId && !jobRecommendedForReconciliation(job) && job.invoiceStatus !== 'Paid').length;
@@ -4248,6 +4329,7 @@ function AccountingModule({
 
       {activeTab === 'reconciliation-queue' && (
         <ReconciliationQueueWorkspace
+          addManualReconciliationRecord={addManualReconciliationRecord}
           items={reconciliationItems}
           vendors={vendors}
         />
@@ -4697,16 +4779,28 @@ function PartnershipStatementsWorkflow({
 }
 
 function ReconciliationQueueWorkspace({
+  addManualReconciliationRecord,
   items,
   vendors,
 }: {
+  addManualReconciliationRecord: (draft: ManualReconciliationDraft) => boolean;
   items: ReconciliationItem[];
   vendors: Vendor[];
 }) {
+  const [showAddRecord, setShowAddRecord] = useState(false);
   const [typeFilter, setTypeFilter] = useState('All');
   const [vendorFilter, setVendorFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [monthFilter, setMonthFilter] = useState('All');
+  const [manualRecordDraft, setManualRecordDraft] = useState<ManualReconciliationDraft>({
+    amount: '',
+    item: '',
+    note: '',
+    property: '',
+    servicePeriod: currentMonthKey(),
+    type: 'Manual Month-End Record',
+    vendorId: vendors[0]?.id ?? '',
+  });
   const monthChoices = Array.from(new Set(items.map((item) => item.servicePeriod))).sort().reverse();
   const filteredItems = items.filter((item) =>
     (typeFilter === 'All' || item.type === typeFilter) &&
@@ -4714,6 +4808,27 @@ function ReconciliationQueueWorkspace({
     (statusFilter === 'All' || item.reconciliationStatus === statusFilter) &&
     (monthFilter === 'All' || item.servicePeriod === monthFilter),
   );
+  const updateManualRecordDraft = (field: keyof ManualReconciliationDraft, value: string) => {
+    setManualRecordDraft((current) => ({ ...current, [field]: value }));
+  };
+  const submitManualRecord = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const recordAdded = addManualReconciliationRecord({
+      ...manualRecordDraft,
+      vendorId: manualRecordDraft.vendorId || vendors[0]?.id || '',
+    });
+    if (!recordAdded) return;
+    setManualRecordDraft({
+      amount: '',
+      item: '',
+      note: '',
+      property: '',
+      servicePeriod: manualRecordDraft.servicePeriod || currentMonthKey(),
+      type: 'Manual Month-End Record',
+      vendorId: manualRecordDraft.vendorId || vendors[0]?.id || '',
+    });
+    setShowAddRecord(false);
+  };
 
   return (
     <section className="table-panel">
@@ -4728,11 +4843,102 @@ function ReconciliationQueueWorkspace({
         </div>
       </div>
 
+      <button
+        aria-expanded={showAddRecord}
+        className={`manual-reconciliation-box ${showAddRecord ? 'active' : ''}`}
+        onClick={() => setShowAddRecord((current) => !current)}
+        type="button"
+      >
+        <span>Month-end report intake</span>
+        <strong>Add reconciliation record</strong>
+        <em>Select a vendor and attach the item to processing for a reconciliation month.</em>
+      </button>
+
+      {showAddRecord && (
+        <form className="manual-reconciliation-form" onSubmit={submitManualRecord}>
+          <div className="form-grid three">
+            <label>
+              Record
+              <input
+                onChange={(event) => updateManualRecordDraft('item', event.target.value)}
+                placeholder="Adjustment, fee, exception, or note"
+                value={manualRecordDraft.item}
+              />
+            </label>
+            <label>
+              Vendor for processing
+              <select
+                onChange={(event) => updateManualRecordDraft('vendorId', event.target.value)}
+                value={manualRecordDraft.vendorId}
+              >
+                {vendors.map((vendor) => (
+                  <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Reconciliation month
+              <input
+                onChange={(event) => updateManualRecordDraft('servicePeriod', event.target.value)}
+                type="month"
+                value={manualRecordDraft.servicePeriod}
+              />
+            </label>
+          </div>
+          <div className="form-grid three">
+            <label>
+              Type
+              <select
+                onChange={(event) => updateManualRecordDraft('type', event.target.value)}
+                value={manualRecordDraft.type}
+              >
+                <option>Manual Month-End Record</option>
+                <option>Vendor Billing</option>
+                <option>Payment Matching</option>
+                <option>Prior-Period Adjustments</option>
+              </select>
+            </label>
+            <label>
+              Property or account
+              <input
+                onChange={(event) => updateManualRecordDraft('property', event.target.value)}
+                placeholder="Optional property/account"
+                value={manualRecordDraft.property}
+              />
+            </label>
+            <label>
+              Amount
+              <input
+                inputMode="decimal"
+                onChange={(event) => updateManualRecordDraft('amount', event.target.value)}
+                placeholder="0"
+                value={manualRecordDraft.amount}
+              />
+            </label>
+          </div>
+          <label>
+            Processing note
+            <input
+              onChange={(event) => updateManualRecordDraft('note', event.target.value)}
+              placeholder="How accounting should process this item"
+              value={manualRecordDraft.note}
+            />
+          </label>
+          <div className="manual-reconciliation-actions">
+            <button type="submit">Add record</button>
+            <button className="secondary-action" onClick={() => setShowAddRecord(false)} type="button">
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
       <div className="queue-filter-bar">
         <label>
           Type
           <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
             <option>All</option>
+            <option>Manual Month-End Record</option>
             <option>Vendor Billing</option>
             <option>Partnership Statements</option>
             <option>Payment Matching</option>
@@ -4860,6 +5066,7 @@ function MonthEndCloseWorkspace({
                 <InfoTile label="Unassigned jobs" value={String(monthQueueItems.filter((item) => item.type === 'Vendor Billing').length)} />
                 <InfoTile label="Payment exceptions" value={String(monthQueueItems.filter((item) => item.type === 'Payment Matching').length)} />
                 <InfoTile label="Prior periods" value={String(monthQueueItems.filter((item) => item.type === 'Prior-Period Adjustments').length)} />
+                <InfoTile label="Manual records" value={String(monthQueueItems.filter((item) => item.type === 'Manual Month-End Record').length)} />
               </div>
             </div>
           </article>
@@ -5862,6 +6069,7 @@ function buildReconciliationItems(
   invoices: InvoiceTrigger[],
   communities: Community[],
   vendors: Vendor[] = [],
+  manualRecords: ManualReconciliationRecord[] = [],
 ): ReconciliationItem[] {
   const invoiceByJob = new Map(
     invoices
@@ -5920,7 +6128,30 @@ function buildReconciliationItems(
       vendor: '',
     }));
 
-  return [...jobItems, ...programItems].sort((a, b) => {
+  const manualItems = manualRecords.map((record) => {
+    const servicePeriod = /^\d{4}-\d{2}$/.test(record.servicePeriod) ? record.servicePeriod : currentMonth;
+    const billingMonth = /^\d{4}-\d{2}$/.test(record.billingMonth) ? record.billingMonth : servicePeriod;
+    const vendor = vendors.find((item) => item.id === record.vendorId);
+    return {
+      ageLabel: ageFromDate(record.createdAt),
+      amount: record.amount,
+      billingCandidate: labelMonth(billingMonth),
+      id: `manual-reconciliation-${record.id}`,
+      item: `${record.item}${record.amount ? ` / ${dollars(record.amount)}` : ''}`,
+      jobStatus: 'Manual record',
+      partner: record.partner,
+      paymentStatus: 'Added to month-end report',
+      program: record.program,
+      property: record.property || 'Month-end report',
+      reconciliationStatus: record.status || 'Open',
+      servicePeriod: labelMonth(servicePeriod),
+      suggestedAction: record.suggestedAction,
+      type: record.type || 'Manual Month-End Record',
+      vendor: vendor?.name ?? record.partner ?? 'Vendor not assigned',
+    };
+  });
+
+  return [...jobItems, ...programItems, ...manualItems].sort((a, b) => {
     if (a.reconciliationStatus !== b.reconciliationStatus) return a.reconciliationStatus.localeCompare(b.reconciliationStatus);
     return b.servicePeriod.localeCompare(a.servicePeriod);
   });

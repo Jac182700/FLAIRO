@@ -893,6 +893,10 @@ export async function POST(request: Request) {
         );
         stageMobileChange = true;
         break;
+      case 'add_manual_reconciliation_record':
+        await addManualReconciliationRecord(payload);
+        stageMobileChange = true;
+        break;
       case 'push_mobile_update':
         await pushMobileUpdate();
         break;
@@ -923,6 +927,7 @@ async function initializeDatabase(db: D1Database) {
     db.prepare('CREATE TABLE IF NOT EXISTS reward_program_settings (id TEXT PRIMARY KEY, point_value_cents INTEGER NOT NULL DEFAULT 1, redemption_cap_percent REAL NOT NULL DEFAULT 10, plus_membership_monthly_cents INTEGER NOT NULL DEFAULT 500, plus_only_accrual INTEGER NOT NULL DEFAULT 1, minimum_gold_balance INTEGER NOT NULL DEFAULT 500, expiration_months INTEGER NOT NULL DEFAULT 12, expiration_reminder_days INTEGER NOT NULL DEFAULT 7, adoption_index_previous_month INTEGER NOT NULL DEFAULT 69, registration_growth_percent REAL NOT NULL DEFAULT 12, activation_rate_percent REAL NOT NULL DEFAULT 46, first_service_conversion_percent REAL NOT NULL DEFAULT 28, active_30_day_rate_percent REAL NOT NULL DEFAULT 37, repeat_use_rate_percent REAL NOT NULL DEFAULT 31, survey_response_rate_percent REAL NOT NULL DEFAULT 38, avg_cx_rating REAL NOT NULL DEFAULT 4.6, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS crm_account_settings (id TEXT PRIMARY KEY, billing_contact TEXT NOT NULL DEFAULT "", accounting_email TEXT NOT NULL DEFAULT "", default_payment_terms TEXT NOT NULL DEFAULT "Net 7", statement_approver TEXT NOT NULL DEFAULT "", document_requirements TEXT NOT NULL DEFAULT "", vendor_onboarding_owner TEXT NOT NULL DEFAULT "", mobile_catalog_owner TEXT NOT NULL DEFAULT "", support_routing TEXT NOT NULL DEFAULT "", account_mode TEXT NOT NULL DEFAULT "Live operations", updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS invoice_triggers (id TEXT PRIMARY KEY, job_order_id TEXT NOT NULL, vendor_id TEXT NOT NULL, amount_cents INTEGER NOT NULL, billing_period TEXT, status TEXT NOT NULL, bluevine_reference TEXT, due_date TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
+    db.prepare('CREATE TABLE IF NOT EXISTS manual_reconciliation_records (id TEXT PRIMARY KEY, type TEXT NOT NULL, item TEXT NOT NULL, property TEXT NOT NULL DEFAULT "", vendor_id TEXT NOT NULL, partner TEXT NOT NULL DEFAULT "", program TEXT NOT NULL DEFAULT "", service_period TEXT NOT NULL, billing_period TEXT NOT NULL, status TEXT NOT NULL DEFAULT "Open", amount_cents INTEGER NOT NULL DEFAULT 0, suggested_action TEXT NOT NULL DEFAULT "", created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS mobile_sync_state (id TEXT PRIMARY KEY, connection_status TEXT NOT NULL, last_checked_at TEXT NOT NULL, last_push_at TEXT, pending_changes INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0, last_push_summary TEXT NOT NULL DEFAULT "No mobile app push yet", updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, subject TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL)'),
   ]);
@@ -933,6 +938,7 @@ async function initializeDatabase(db: D1Database) {
     db.prepare('CREATE INDEX IF NOT EXISTS idx_vendor_documents_vendor ON vendor_documents (vendor_id, document_type, created_at)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_rewards_status ON reward_ledger_entries (status)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_invoice_triggers_billing ON invoice_triggers (vendor_id, billing_period, status)'),
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_manual_reconciliation_vendor_period ON manual_reconciliation_records (vendor_id, billing_period, status)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_reward_program_settings_updated_at ON reward_program_settings (updated_at)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_crm_account_settings_updated_at ON crm_account_settings (updated_at)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_mobile_sync_updated_at ON mobile_sync_state (updated_at)'),
@@ -1075,6 +1081,7 @@ async function readState(db: D1Database) {
   const jobRows = await db.prepare('SELECT r.*, j.vendor_id, j.task_status, j.service_date, j.schedule_confirmed_at, j.vendor_confirmed_at, j.claimed_at, j.schedule_due_at, j.payment_consult_status, j.resident_paid_vendor, j.vendor_payment_confirmed, j.resident_payment_confirmed, j.amount_paid_cents, j.payment_date, j.receipt_number, j.payment_inquiry_status, j.service_amount_cents, j.flairo_fee_cents, j.points, j.invoice_trigger_status FROM resident_requests r JOIN job_orders j ON j.request_id = r.id ORDER BY r.id DESC').all();
   const rewardRows = await db.prepare('SELECT * FROM reward_ledger_entries ORDER BY created_at DESC, id DESC').all();
   const invoiceRows = await db.prepare('SELECT * FROM invoice_triggers ORDER BY created_at DESC, id DESC').all();
+  const manualReconciliationRows = await db.prepare('SELECT * FROM manual_reconciliation_records ORDER BY created_at DESC, id DESC').all();
   const auditRows = await db.prepare('SELECT * FROM audit_events ORDER BY created_at DESC, id DESC LIMIT 20').all();
   const mobileSyncRow = await db.prepare('SELECT * FROM mobile_sync_state WHERE id = ?').bind('default').first<Record<string, unknown>>();
   const rewardSettingsRow = await db.prepare('SELECT * FROM reward_program_settings WHERE id = ?').bind('default').first<Record<string, unknown>>();
@@ -1112,6 +1119,21 @@ async function readState(db: D1Database) {
       jobId: String(row.job_order_id),
       reference: String(row.bluevine_reference ?? ''),
       status: String(row.status),
+      vendorId: String(row.vendor_id),
+    })),
+    manualReconciliationRecords: manualReconciliationRows.results.map((row) => ({
+      amount: dollarsFromCents(Number(row.amount_cents)),
+      billingMonth: String(row.billing_period),
+      createdAt: String(row.created_at),
+      id: String(row.id),
+      item: String(row.item),
+      partner: String(row.partner ?? ''),
+      program: String(row.program ?? ''),
+      property: String(row.property ?? ''),
+      servicePeriod: String(row.service_period),
+      status: String(row.status),
+      suggestedAction: String(row.suggested_action ?? ''),
+      type: String(row.type),
       vendorId: String(row.vendor_id),
     })),
     jobs: jobRows.results.map((row) => {
@@ -1918,6 +1940,46 @@ async function finalizePartnershipStatement(
   );
 }
 
+async function addManualReconciliationRecord(payload: ActionPayload) {
+  const item = textPayload(payload, 'item')?.trim();
+  const vendorId = textPayload(payload, 'vendorId')?.trim();
+  if (!item || !vendorId) return;
+
+  const vendor = await env.DB.prepare('SELECT business_name FROM vendors WHERE id = ? LIMIT 1')
+    .bind(vendorId)
+    .first<{ business_name: string }>();
+  if (!vendor) return;
+
+  const stamp = now();
+  const recordId = textPayload(payload, 'recordId')?.trim() || `MR-${Date.now()}`;
+  const servicePeriod = monthPayload(payload, 'servicePeriod', currentMonthKey());
+  const billingPeriod = monthPayload(payload, 'billingMonth', servicePeriod);
+  const type = textPayload(payload, 'type')?.trim() || 'Manual Month-End Record';
+  const property = textPayload(payload, 'property')?.trim() || 'Month-end report';
+  const suggestedAction = textPayload(payload, 'note')?.trim() || `Apply to ${vendor.business_name} for month-end processing`;
+  const amount = Math.max(0, numericPayload(payload, 'amount', 0));
+
+  await env.DB.prepare('INSERT OR IGNORE INTO manual_reconciliation_records (id, type, item, property, vendor_id, partner, program, service_period, billing_period, status, amount_cents, suggested_action, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(
+      recordId,
+      type,
+      item,
+      property,
+      vendorId,
+      vendor.business_name,
+      'Manual month-end report',
+      servicePeriod,
+      billingPeriod,
+      'Open',
+      cents(amount),
+      suggestedAction,
+      stamp,
+      stamp,
+    )
+    .run();
+  await logEvent('Reconciliation record added', recordId, `${item} added to ${billingPeriod} month-end processing for ${vendor.business_name}.`);
+}
+
 async function updateRewardSettings(payload: Record<string, string | number | boolean | null>) {
   const stamp = now();
   await env.DB.prepare(`
@@ -2087,6 +2149,11 @@ function booleanPayload(payload: ActionPayload, key: string, fallback: boolean) 
   if (typeof value === 'number') return value !== 0;
   if (typeof value === 'string') return value === 'true' || value === '1';
   return fallback;
+}
+
+function monthPayload(payload: ActionPayload, key: string, fallback: string) {
+  const value = textPayload(payload, key)?.trim();
+  return value && /^\d{4}-\d{2}$/.test(value) ? value : fallback;
 }
 
 function normalizeRewardStatus(value: string) {
