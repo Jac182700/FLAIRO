@@ -13,6 +13,12 @@ type ServiceSeed = {
   vendorPoolRule: string;
 };
 
+type PartnershipProfileProgramSeed = {
+  glCode: string;
+  identifier: string;
+  name: string;
+};
+
 type CommunitySeed = {
   id: string;
   name: string;
@@ -22,7 +28,7 @@ type CommunitySeed = {
   homes: number;
   occupied: number;
   plusMembers: number;
-  recurringPrograms: string[];
+  recurringPrograms: PartnershipProfileProgramSeed[];
   servicePenetration: number;
   netIncome: number;
   statementStatus: string;
@@ -241,7 +247,10 @@ const communities: CommunitySeed[] = [
     homes: 214,
     occupied: 202,
     plusMembers: 48,
-    recurringPrograms: ['Pest Share', 'Trash Valet'],
+    recurringPrograms: [
+      { glCode: '40980', identifier: 'PEST', name: 'Pest Share' },
+      { glCode: '40982', identifier: 'TRASH', name: 'Trash Valet' },
+    ],
     servicePenetration: 36,
     netIncome: 1840,
     statementStatus: 'Ready',
@@ -255,7 +264,10 @@ const communities: CommunitySeed[] = [
     homes: 288,
     occupied: 270,
     plusMembers: 61,
-    recurringPrograms: ['Valet Parking', 'Pest Share'],
+    recurringPrograms: [
+      { glCode: '40990', identifier: 'VALET', name: 'Valet Parking' },
+      { glCode: '40980', identifier: 'PEST', name: 'Pest Share' },
+    ],
     servicePenetration: 31,
     netIncome: 2265,
     statementStatus: 'Draft',
@@ -269,7 +281,10 @@ const communities: CommunitySeed[] = [
     homes: 312,
     occupied: 297,
     plusMembers: 73,
-    recurringPrograms: ['Pest Share', 'Package Lockers'],
+    recurringPrograms: [
+      { glCode: '40980', identifier: 'PEST', name: 'Pest Share' },
+      { glCode: '40984', identifier: 'LOCKERS', name: 'Package Lockers' },
+    ],
     servicePenetration: 44,
     netIncome: 2659.76,
     statementStatus: 'Issued',
@@ -894,6 +909,7 @@ export async function POST(request: Request) {
           textPayload(payload, 'monthKey'),
           listPayload(payload, 'programIdsJson', []),
           booleanPayload(payload, 'reviewAcknowledged', false),
+          partnershipStatementRowsPayload(payload),
         );
         stageMobileChange = true;
         break;
@@ -1113,7 +1129,7 @@ async function readState(db: D1Database) {
       netIncome: dollarsFromCents(Number(row.net_income_cents)),
       occupied: Number(row.occupied_homes),
       plusMembers: Number(row.plus_members),
-      recurringPrograms: normalizeTextList(parseJsonArray(String(row.recurring_programs ?? '[]'))),
+      recurringPrograms: parseRecurringPrograms(String(row.recurring_programs ?? '[]')),
       servicePenetration: Number(row.service_penetration),
       statementStatus: String(row.statement_status),
     })),
@@ -1416,7 +1432,7 @@ async function createPartnershipProfile(payload: ActionPayload) {
   const homes = Math.max(0, Math.round(numericPayload(payload, 'homes', 0)));
   const occupied = Math.max(0, Math.round(numericPayload(payload, 'occupied', homes)));
   const plusMembers = Math.max(0, Math.round(numericPayload(payload, 'plusMembers', 0)));
-  const recurringPrograms = normalizeTextList(listPayload(payload, 'recurringProgramsJson', []));
+  const recurringPrograms = recurringProgramsPayload(payload);
   const servicePenetration = Math.max(0, Math.min(100, numericPayload(payload, 'servicePenetration', 0)));
   const netIncomeCents = cents(Math.max(0, numericPayload(payload, 'netIncome', 0)));
 
@@ -1438,7 +1454,7 @@ async function updatePartnershipProfile(payload: ActionPayload) {
   const homes = Math.max(0, Math.round(numericPayload(payload, 'homes', 0)));
   const occupied = Math.max(0, Math.round(numericPayload(payload, 'occupied', homes)));
   const plusMembers = Math.max(0, Math.round(numericPayload(payload, 'plusMembers', 0)));
-  const recurringPrograms = normalizeTextList(listPayload(payload, 'recurringProgramsJson', []));
+  const recurringPrograms = recurringProgramsPayload(payload);
   const servicePenetration = Math.max(0, Math.min(100, numericPayload(payload, 'servicePenetration', 0)));
   const netIncomeCents = cents(Math.max(0, numericPayload(payload, 'netIncome', 0)));
 
@@ -1935,16 +1951,19 @@ async function finalizePartnershipStatement(
   monthKey?: string,
   programIds: string[] = [],
   reviewAcknowledged = false,
+  statementRows: Array<{ income: number; status: string }> = [],
 ) {
   if (!communityId || !monthKey || !/^\d{4}-\d{2}$/.test(monthKey) || !programIds.length) return;
   const stamp = now();
+  const statementTotal = statementRows.reduce((sum, row) => sum + row.income, 0);
+  const reviewCount = statementRows.filter((row) => row.status !== 'Ready').length;
   await env.DB.prepare('UPDATE communities SET statement_status = ?, updated_at = ? WHERE id = ?')
     .bind('Issued', stamp, communityId)
     .run();
   await logEvent(
     'Partnership statement issued',
     communityId,
-    `${programIds.length} selected program${programIds.length === 1 ? '' : 's'} issued for ${monthKey}; review acknowledgement ${reviewAcknowledged ? 'recorded' : 'not required'} and excluded items remain in reconciliation.`,
+    `${programIds.length} selected program${programIds.length === 1 ? '' : 's'} issued for ${monthKey} totaling ${formatDollars(statementTotal)}; ${reviewCount} review line${reviewCount === 1 ? '' : 's'} and review acknowledgement ${reviewAcknowledged ? 'recorded' : 'not required'}.`,
   );
 }
 
@@ -2237,15 +2256,102 @@ function parseJsonArray(value: string) {
   }
 }
 
-function normalizeTextList(values: string[]) {
+function recurringProgramsPayload(payload: ActionPayload) {
+  return parseRecurringPrograms(textPayload(payload, 'recurringProgramsJson') ?? '[]');
+}
+
+function parseRecurringPrograms(value: string) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    parsed = [];
+  }
+  if (!Array.isArray(parsed)) return [];
+
   const seen = new Set<string>();
-  return values.reduce<string[]>((list, value) => {
-    const normalized = value.trim().replace(/\s+/g, ' ');
-    const key = normalized.toLowerCase();
-    if (!normalized || seen.has(key)) return list;
+  return parsed.reduce<PartnershipProfileProgramSeed[]>((programs, item) => {
+    const program = typeof item === 'string'
+      ? recurringProgramFromName(item)
+      : recurringProgramFromRecord(item);
+    const key = programKey(program.name);
+    if (!key || seen.has(key)) return programs;
     seen.add(key);
-    return [...list, normalized];
+    return [...programs, program];
   }, []);
+}
+
+function recurringProgramFromRecord(item: unknown): PartnershipProfileProgramSeed {
+  if (!item || typeof item !== 'object') return recurringProgramFromName('');
+  const record = item as Record<string, unknown>;
+  const name = String(record.name ?? '').trim().replace(/\s+/g, ' ');
+  const preset = recurringProgramPresetForName(name);
+  return {
+    glCode: String(record.glCode ?? preset.glCode).trim(),
+    identifier: String(record.identifier ?? preset.identifier).trim().replace(/\s+/g, ' ').toUpperCase(),
+    name,
+  };
+}
+
+function recurringProgramFromName(name: string): PartnershipProfileProgramSeed {
+  const normalizedName = name.trim().replace(/\s+/g, ' ');
+  const preset = recurringProgramPresetForName(normalizedName);
+  return {
+    glCode: preset.glCode,
+    identifier: preset.identifier || shortIdentifierFromName(normalizedName),
+    name: normalizedName,
+  };
+}
+
+function recurringProgramPresetForName(name: string) {
+  const presets: PartnershipProfileProgramSeed[] = [
+    { glCode: '40990', identifier: 'VALET', name: 'Valet Parking' },
+    { glCode: '40980', identifier: 'PEST', name: 'Pest Share' },
+    { glCode: '40982', identifier: 'TRASH', name: 'Trash Valet' },
+    { glCode: '40984', identifier: 'LOCKERS', name: 'Package Lockers' },
+    { glCode: '40986', identifier: 'AMENITY', name: 'Amenity Reservations' },
+  ];
+  return presets.find((preset) => programKey(preset.name) === programKey(name)) ?? { glCode: '', identifier: '', name };
+}
+
+function partnershipStatementRowsPayload(payload: ActionPayload) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(textPayload(payload, 'statementRowsJson') ?? '[]');
+  } catch {
+    parsed = [];
+  }
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed.map((item) => {
+    const record = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+    return {
+      glCode: String(record.glCode ?? '').trim(),
+      identifier: String(record.identifier ?? '').trim(),
+      income: Math.max(0, Number(record.income) || 0),
+      program: String(record.program ?? '').trim(),
+      status: String(record.status ?? 'Review'),
+    };
+  });
+}
+
+function shortIdentifierFromName(name: string) {
+  const identifier = name
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((part) => part.slice(0, 4))
+    .join('');
+  return identifier.slice(0, 12);
+}
+
+function programKey(name: string) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function formatDollars(value: number) {
+  return value.toLocaleString('en-US', { currency: 'USD', maximumFractionDigits: 2, style: 'currency' });
 }
 
 function dataUrlToArrayBuffer(value: string) {

@@ -739,6 +739,18 @@ a:focus-visible {
   padding: 8px 10px;
 }
 
+.recurring-program-option span {
+  display: grid;
+  gap: 2px;
+}
+
+.recurring-program-option em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 750;
+}
+
 .recurring-program-add {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -750,34 +762,41 @@ a:focus-visible {
 }
 
 .recurring-program-selected {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 8px;
 }
 
-.recurring-program-chip {
-  display: inline-flex;
+.recurring-program-line {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(120px, 0.65fr) minmax(120px, 0.65fr) auto;
   align-items: center;
-  gap: 7px;
-  max-width: 100%;
+  gap: 8px;
   border: 1px solid rgba(247, 134, 199, 0.3);
   border-radius: 8px;
   background: rgba(247, 134, 199, 0.1);
-  color: #ffffff;
-  font-size: 12px;
-  font-weight: 850;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
-  padding: 7px 8px 7px 10px;
+  padding: 10px;
 }
 
-.recurring-program-chip button {
-  min-height: 24px;
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--pink);
+.recurring-program-line strong {
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+
+.recurring-program-line label {
+  gap: 4px;
   font-size: 11px;
-  padding: 3px 7px;
+}
+
+.recurring-program-line input {
+  min-height: 34px;
+  padding-block: 7px;
+}
+
+.recurring-program-line button {
+  min-height: 34px;
+  padding: 7px 9px;
 }
 
 .partnership-profile-list {
@@ -2515,7 +2534,8 @@ input::placeholder {
   flex: none;
 }
 
-.partnership-row input {
+.partnership-row input,
+.partnership-row select {
   min-height: 36px;
   padding-block: 7px;
 }
@@ -2674,6 +2694,7 @@ input::placeholder {
   .service-check-grid,
   .recurring-program-options,
   .recurring-program-add,
+  .recurring-program-line,
   .form-grid.two,
   .form-grid.three,
   .form-grid.four,

@@ -54,6 +54,12 @@ type Service = {
   vendorPoolRule: string;
 };
 
+type PartnershipProfileProgram = {
+  glCode: string;
+  identifier: string;
+  name: string;
+};
+
 type Community = {
   id: string;
   name: string;
@@ -63,10 +69,23 @@ type Community = {
   homes: number;
   occupied: number;
   plusMembers: number;
-  recurringPrograms: string[];
+  recurringPrograms: PartnershipProfileProgram[];
   servicePenetration: number;
   netIncome: number;
   statementStatus: StatementStatus;
+};
+
+type PartnershipStatementProgram = {
+  activity: string;
+  glCode: string;
+  id: string;
+  identifier: string;
+  income: number;
+  name: string;
+  period: string;
+  pointsEarned: number;
+  pointsRedeemed: number;
+  status: 'Ready' | 'Review';
 };
 
 type Vendor = {
@@ -205,6 +224,7 @@ type PartnershipProgram = {
 type PartnershipStatementExportRow = {
   activity: string;
   glCode: string;
+  identifier: string;
   income: number;
   period: string;
   program: string;
@@ -362,7 +382,7 @@ type PartnershipProfileDraft = {
   netIncome: string;
   occupied: string;
   plusMembers: string;
-  recurringPrograms: string[];
+  recurringPrograms: PartnershipProfileProgram[];
   servicePenetration: string;
 };
 
@@ -509,7 +529,10 @@ const initialCommunities: Community[] = [
     homes: 214,
     occupied: 202,
     plusMembers: 48,
-    recurringPrograms: ['Pest Share', 'Trash Valet'],
+    recurringPrograms: [
+      { glCode: '40980', identifier: 'PEST', name: 'Pest Share' },
+      { glCode: '40982', identifier: 'TRASH', name: 'Trash Valet' },
+    ],
     servicePenetration: 36,
     netIncome: 1840,
     statementStatus: 'Ready',
@@ -523,7 +546,10 @@ const initialCommunities: Community[] = [
     homes: 288,
     occupied: 270,
     plusMembers: 61,
-    recurringPrograms: ['Valet Parking', 'Pest Share'],
+    recurringPrograms: [
+      { glCode: '40990', identifier: 'VALET', name: 'Valet Parking' },
+      { glCode: '40980', identifier: 'PEST', name: 'Pest Share' },
+    ],
     servicePenetration: 31,
     netIncome: 2265,
     statementStatus: 'Draft',
@@ -537,7 +563,10 @@ const initialCommunities: Community[] = [
     homes: 312,
     occupied: 297,
     plusMembers: 73,
-    recurringPrograms: ['Pest Share', 'Package Lockers'],
+    recurringPrograms: [
+      { glCode: '40980', identifier: 'PEST', name: 'Pest Share' },
+      { glCode: '40984', identifier: 'LOCKERS', name: 'Package Lockers' },
+    ],
     servicePenetration: 44,
     netIncome: 2659.76,
     statementStatus: 'Issued',
@@ -875,12 +904,12 @@ const initialCrmAccountSettings: CrmAccountSettings = {
   vendorOnboardingOwner: 'Vendor Operations',
 };
 
-const recurringProgramPresets = [
-  'Valet Parking',
-  'Pest Share',
-  'Trash Valet',
-  'Package Lockers',
-  'Amenity Reservations',
+const recurringProgramPresets: PartnershipProfileProgram[] = [
+  { glCode: '40990', identifier: 'VALET', name: 'Valet Parking' },
+  { glCode: '40980', identifier: 'PEST', name: 'Pest Share' },
+  { glCode: '40982', identifier: 'TRASH', name: 'Trash Valet' },
+  { glCode: '40984', identifier: 'LOCKERS', name: 'Package Lockers' },
+  { glCode: '40986', identifier: 'AMENITY', name: 'Amenity Reservations' },
 ];
 
 const initialManualReconciliationRecords: ManualReconciliationRecord[] = [];
@@ -2152,7 +2181,13 @@ export default function ControlCenter({
     void persistAction('mark_vendor_statement_paid', { monthKey, vendorId });
   };
 
-  const finalizePartnershipStatement = (communityId: string, monthKey: string, programIds: string[], reviewAcknowledged: boolean) => {
+  const finalizePartnershipStatement = (
+    communityId: string,
+    monthKey: string,
+    programIds: string[],
+    reviewAcknowledged: boolean,
+    statementRows: PartnershipStatementExportRow[] = [],
+  ) => {
     if (!programIds.length) {
       addAudit('Partnership statement waiting', `${communityName(communityId, communities)} needs at least one selected program before issuing.`);
       return;
@@ -2162,16 +2197,19 @@ export default function ControlCenter({
         community.id === communityId ? { ...community, statementStatus: 'Issued' } : community,
       ),
     );
-    const reviewPrograms = partnershipPrograms.filter((program) => programIds.includes(program.id) && program.status !== 'Ready').length;
+    const reviewPrograms = statementRows.filter((program) => program.status !== 'Ready').length;
+    const statementTotal = statementRows.reduce((sum, program) => sum + program.income, 0);
     addAudit(
       'Partnership statement issued',
-      `${communityName(communityId, communities)} ${labelMonth(monthKey)} statement issued with ${programIds.length} selected program${programIds.length === 1 ? '' : 's'}; ${reviewPrograms} required review and excluded items remain in Reconciliation Queue.`,
+      `${communityName(communityId, communities)} ${labelMonth(monthKey)} statement issued with ${programIds.length} selected program${programIds.length === 1 ? '' : 's'} totaling ${dollars(statementTotal)}; ${reviewPrograms} required review and excluded items remain in Reconciliation Queue.`,
     );
     void persistAction('finalize_partnership_statement', {
       communityId,
       monthKey,
       programIdsJson: JSON.stringify(programIds),
       reviewAcknowledged,
+      statementRowsJson: JSON.stringify(statementRows),
+      statementTotal,
     });
   };
 
@@ -4294,7 +4332,7 @@ function AccountingModule({
 }: {
   addManualReconciliationRecord: (draft: ManualReconciliationDraft) => boolean;
   communities: Community[];
-  finalizePartnershipStatement: (communityId: string, monthKey: string, programIds: string[], reviewAcknowledged: boolean) => void;
+  finalizePartnershipStatement: (communityId: string, monthKey: string, programIds: string[], reviewAcknowledged: boolean, statementRows?: PartnershipStatementExportRow[]) => void;
   finalizeVendorInvoice: (vendorId: string, monthKey: string, jobIds: string[], reviewAcknowledged: boolean) => void;
   highlightRecordId?: string | null;
   invoices: InvoiceTrigger[];
@@ -4330,7 +4368,7 @@ function AccountingModule({
           { label: 'Requires review', value: String(reviewJobs), detail: 'Available with acknowledgement' },
           { label: 'Open reconciliation', value: String(reconciliationItems.length), detail: 'Visible until resolved' },
           { label: 'Open invoices', value: String(openStatements.length), detail: 'Vendor billing in progress' },
-          { label: 'Partner programs', value: String(partnershipPrograms.length), detail: 'Configured statement lines' },
+          { label: 'Partner programs', value: String(countConfiguredPartnershipPrograms(communities)), detail: 'Configured profile lines' },
           { label: 'Reward ledger', value: String(rewards.length), detail: 'Plume Point activity' },
         ]}
       />
@@ -4644,28 +4682,38 @@ function PartnershipStatementsWorkflow({
   highlightRecordId,
 }: {
   communities: Community[];
-  finalizePartnershipStatement: (communityId: string, monthKey: string, programIds: string[], reviewAcknowledged: boolean) => void;
+  finalizePartnershipStatement: (communityId: string, monthKey: string, programIds: string[], reviewAcknowledged: boolean, statementRows?: PartnershipStatementExportRow[]) => void;
   highlightRecordId?: string | null;
 }) {
   const [communityId, setCommunityId] = useState(() => communityIdFromHighlight(highlightRecordId, communities, communities[0]?.id ?? ''));
   const [monthKey, setMonthKey] = useState(currentMonthKey());
   const [programSelection, setProgramSelection] = useState<{ ids: string[]; key: string }>({ ids: [], key: '' });
   const [glOverrides, setGlOverrides] = useState<Record<string, string>>({});
+  const [incomeDrafts, setIncomeDrafts] = useState<Record<string, string>>({});
   const [statementReportOpen, setStatementReportOpen] = useState(false);
   const selectionKey = `${communityId}-${monthKey}`;
   const selectedProgramIds = programSelection.key === selectionKey ? programSelection.ids : [];
+  const community = communities.find((item) => item.id === communityId);
+  const basePrograms = buildPartnershipStatementPrograms(community, monthKey);
+  const glCodeOptions = normalizeRecurringPrograms(community?.recurringPrograms ?? []).filter((program) => program.glCode.trim());
+  const statementIncome = (programId: string) => Math.max(0, Number(incomeDrafts[programId]) || 0);
+  const programs = basePrograms.map((program) => ({
+    ...program,
+    glCode: glOverrides[program.id] ?? program.glCode,
+    income: statementIncome(program.id),
+    status: (glOverrides[program.id] ?? program.glCode).trim() && program.identifier.trim() ? program.status : 'Review',
+  }));
   const monthChoices = accountingMonthChoices([], []).concat(
     partnershipPrograms
       .map((program) => program.period)
       .filter((period, index, periods) => periods.indexOf(period) === index),
   ).filter((period, index, periods) => periods.indexOf(period) === index);
 
-  const programs = partnershipPrograms.filter((program) => program.communityId === communityId && program.period === monthKey);
   const readyPrograms = programs.filter((program) => program.status === 'Ready');
   const selectedPrograms = programs.filter((program) => selectedProgramIds.includes(program.id));
   const reviewPrograms = selectedPrograms.filter((program) => program.status !== 'Ready');
+  const selectedProgramsMissingIncome = selectedPrograms.filter((program) => program.income <= 0);
   const selectedIncome = selectedPrograms.reduce((sum, program) => sum + program.income, 0);
-  const community = communities.find((item) => item.id === communityId);
   const statementReport: PartnershipStatementExport = {
     communityName: community?.name ?? 'Community',
     manager: community?.manager ?? 'Ownership partner',
@@ -4678,10 +4726,11 @@ function PartnershipStatementsWorkflow({
     programsSelected: selectedPrograms.length,
     reviewLines: reviewPrograms.length,
     rows: selectedPrograms.map((program) => ({
-      activity: `${program.jobsBooked} activities / ${program.popularService}`,
-      glCode: glOverrides[program.id] ?? program.glCode,
+      activity: program.activity,
+      glCode: program.glCode,
+      identifier: program.identifier,
       income: program.income,
-      period: labelMonth(program.period),
+      period: labelMonth(monthKey),
       program: program.name,
       status: program.status,
     })),
@@ -4700,12 +4749,20 @@ function PartnershipStatementsWorkflow({
   const replaceProgramSelection = (ids: string[]) => setProgramSelection({ ids, key: selectionKey });
 
   const finalizeStatement = () => {
-    if (!selectedProgramIds.length) return false;
+    if (!selectedPrograms.length) return false;
+    if (selectedPrograms.some((program) => !program.glCode.trim())) {
+      window.alert('Select a GL code for each selected program before issuing this partnership statement.');
+      return false;
+    }
+    if (selectedProgramsMissingIncome.length) {
+      window.alert('Enter income for each selected program before issuing this partnership statement.');
+      return false;
+    }
     if (reviewPrograms.length) {
       const confirmed = window.confirm('Some selected programs require review. Issue the partnership statement with admin acknowledgement?');
       if (!confirmed) return false;
     }
-    finalizePartnershipStatement(communityId, monthKey, selectedProgramIds, reviewPrograms.length > 0);
+    finalizePartnershipStatement(communityId, monthKey, selectedProgramIds, reviewPrograms.length > 0, statementReport.rows);
     replaceProgramSelection([]);
     setStatementReportOpen(false);
     return true;
@@ -4781,22 +4838,38 @@ function PartnershipStatementsWorkflow({
                   checked={selectedProgramIds.includes(program.id)}
                   onChange={(event) => toggleProgramSelection(program.id, event.target.checked)}
                   type="checkbox"
-                />
+              />
                 <span>{program.status}</span>
               </label>
-              <strong>{program.name}</strong>
+              <strong>{program.name}<em>{program.identifier || 'Profile ID needed'}</em></strong>
               <span>{labelMonth(program.period)}</span>
-              <input
+              <select
                 aria-label={`${program.name} GL code`}
                 onChange={(event) => setGlOverrides((current) => ({ ...current, [program.id]: event.target.value }))}
-                value={glOverrides[program.id] ?? program.glCode}
+                value={program.glCode}
+              >
+                <option value="">Select GL</option>
+                {glCodeOptions.map((option) => (
+                  <option key={`${option.name}-${option.identifier}-${option.glCode}`} value={option.glCode}>
+                    {option.identifier} / {option.glCode}
+                  </option>
+                ))}
+                {program.glCode && !glCodeOptions.some((option) => option.glCode === program.glCode) && (
+                  <option value={program.glCode}>{program.identifier} / {program.glCode}</option>
+                )}
+              </select>
+              <input
+                aria-label={`${program.name} income`}
+                inputMode="decimal"
+                onChange={(event) => setIncomeDrafts((current) => ({ ...current, [program.id]: event.target.value }))}
+                placeholder="0.00"
+                value={incomeDrafts[program.id] ?? ''}
               />
-              <span>{dollars(program.income)}</span>
               <span><b className={`status ${program.status === 'Ready' ? 'good' : 'review'}`}>{program.status}</b></span>
-              <span>{program.jobsBooked} activities<em>{program.popularService}</em></span>
+              <span>{program.activity}<em>{program.identifier || 'Profile ID needed'}</em></span>
             </div>
           )) : (
-            <div className="empty-note table-empty">No program income lines match this statement month.</div>
+            <div className="empty-note table-empty">No recurring profile programs are saved for this partnership.</div>
           )}
         </div>
       </div>
@@ -4888,7 +4961,7 @@ function PartnershipStatementExportModal({
             <div className="statement-export-row" key={`${row.program}-${row.glCode}`} role="row">
               <strong>{row.program}</strong>
               <span>{row.period}</span>
-              <span>{row.glCode}</span>
+              <span>{row.identifier} / {row.glCode}</span>
               <span>{dollars(row.income)}</span>
               <span><b className={`status ${row.status === 'Ready' ? 'good' : 'review'}`}>{row.status}</b></span>
               <span>{row.activity}</span>
@@ -4929,7 +5002,7 @@ function downloadPartnershipStatementExcel(report: PartnershipStatementExport) {
       <tr>
         <td>${escapeHtml(row.program)}</td>
         <td>${escapeHtml(row.period)}</td>
-        <td>${escapeHtml(row.glCode)}</td>
+        <td>${escapeHtml(`${row.identifier} / ${row.glCode}`)}</td>
         <td>${row.income.toFixed(2)}</td>
         <td>${escapeHtml(row.status)}</td>
         <td>${escapeHtml(row.activity)}</td>
@@ -5054,7 +5127,7 @@ function createPartnershipStatementPdf(report: PartnershipStatementExport) {
   report.rows.slice(0, 24).forEach((row) => {
     streamParts.push(pdfText(44, y, 8, truncatePdfText(row.program, 28)));
     streamParts.push(pdfText(190, y, 8, truncatePdfText(row.period, 12)));
-    streamParts.push(pdfText(270, y, 8, truncatePdfText(row.glCode, 12)));
+    streamParts.push(pdfText(270, y, 8, truncatePdfText(`${row.identifier} / ${row.glCode}`, 12)));
     streamParts.push(pdfText(346, y, 8, dollars(row.income)));
     streamParts.push(pdfText(420, y, 8, truncatePdfText(row.status, 12)));
     streamParts.push(pdfText(486, y, 8, truncatePdfText(row.activity, 24)));
@@ -5619,27 +5692,37 @@ function SettingsModule({
     ...recurringProgramPresets,
     ...services
       .filter((service) => service.name.toLowerCase().includes('recurring'))
-      .map((service) => service.name),
+      .map((service) => recurringProgramFromName(service.name)),
     ...communities.flatMap((community) => community.recurringPrograms ?? []),
   ]), [communities, services]);
   const selectedRecurringPrograms = normalizeRecurringPrograms(profileDraft.recurringPrograms);
   const updateProfileDraft = (field: Exclude<keyof PartnershipProfileDraft, 'recurringPrograms'>, value: string) => {
     setProfileDraft((current) => ({ ...current, [field]: value }));
   };
-  const toggleRecurringProgram = (program: string, checked: boolean) => {
+  const toggleRecurringProgram = (program: PartnershipProfileProgram, checked: boolean) => {
     setProfileDraft((current) => {
       const programs = checked
         ? normalizeRecurringPrograms([...current.recurringPrograms, program])
-        : current.recurringPrograms.filter((item) => item.trim().toLowerCase() !== program.trim().toLowerCase());
+        : current.recurringPrograms.filter((item) => programKey(item.name) !== programKey(program.name));
       return { ...current, recurringPrograms: programs };
     });
+  };
+  const updateRecurringProgram = (programName: string, field: keyof Omit<PartnershipProfileProgram, 'name'>, value: string) => {
+    setProfileDraft((current) => ({
+      ...current,
+      recurringPrograms: normalizeRecurringPrograms(current.recurringPrograms.map((program) =>
+        programKey(program.name) === programKey(programName)
+          ? { ...program, [field]: value }
+          : program,
+      )),
+    }));
   };
   const addCustomRecurringProgram = () => {
     const program = customRecurringProgram.trim();
     if (!program) return;
     setProfileDraft((current) => ({
       ...current,
-      recurringPrograms: normalizeRecurringPrograms([...current.recurringPrograms, program]),
+      recurringPrograms: normalizeRecurringPrograms([...current.recurringPrograms, recurringProgramFromName(program)]),
     }));
     setCustomRecurringProgram('');
   };
@@ -5764,13 +5847,16 @@ function SettingsModule({
               </div>
               <div className="recurring-program-options">
                 {recurringProgramOptions.map((program) => (
-                  <label className="check-control recurring-program-option" key={program}>
+                  <label className="check-control recurring-program-option" key={program.name}>
                     <input
-                      checked={selectedRecurringPrograms.some((item) => item.toLowerCase() === program.toLowerCase())}
+                      checked={selectedRecurringPrograms.some((item) => programKey(item.name) === programKey(program.name))}
                       onChange={(event) => toggleRecurringProgram(program, event.target.checked)}
                       type="checkbox"
                     />
-                    <span>{program}</span>
+                    <span>
+                      {program.name}
+                      <em>{program.identifier} / {program.glCode || 'GL needed'}</em>
+                    </span>
                   </label>
                 ))}
               </div>
@@ -5793,12 +5879,31 @@ function SettingsModule({
               {selectedRecurringPrograms.length ? (
                 <div className="recurring-program-selected" aria-label="Selected recurring programs">
                   {selectedRecurringPrograms.map((program) => (
-                    <span className="recurring-program-chip" key={program}>
-                      {program}
-                      <button aria-label={`Remove ${program}`} onClick={() => toggleRecurringProgram(program, false)} type="button">
+                    <div className="recurring-program-line" key={program.name}>
+                      <strong>{program.name}</strong>
+                      <label>
+                        Short ID
+                        <input
+                          aria-label={`${program.name} short identifier`}
+                          onChange={(event) => updateRecurringProgram(program.name, 'identifier', event.target.value)}
+                          placeholder="PEST"
+                          value={program.identifier}
+                        />
+                      </label>
+                      <label>
+                        GL number
+                        <input
+                          aria-label={`${program.name} GL number`}
+                          inputMode="numeric"
+                          onChange={(event) => updateRecurringProgram(program.name, 'glCode', event.target.value)}
+                          placeholder="40980"
+                          value={program.glCode}
+                        />
+                      </label>
+                      <button aria-label={`Remove ${program.name}`} className="secondary-action" onClick={() => toggleRecurringProgram(program, false)} type="button">
                         Remove
                       </button>
-                    </span>
+                    </div>
                   ))}
                 </div>
               ) : (
@@ -5883,7 +5988,7 @@ function SettingsModule({
               <span>
                 {community.name}
                 <em>{community.market} / {community.manager}</em>
-                <em>{(community.recurringPrograms ?? []).length ? `Programs: ${(community.recurringPrograms ?? []).join(', ')}` : 'Programs: Not set'}</em>
+                <em>{(community.recurringPrograms ?? []).length ? `Programs: ${community.recurringPrograms.map(profileProgramLabel).join(', ')}` : 'Programs: Not set'}</em>
               </span>
               <strong>{community.statementStatus}</strong>
               <span>{community.plusMembers} PLUS</span>
@@ -6796,13 +6901,111 @@ function communityName(communityId: string, communities: Community[]) {
   return communities.find((community) => community.id === communityId)?.name ?? 'Community not set';
 }
 
-function normalizeRecurringPrograms(programs: string[]) {
+function buildPartnershipStatementPrograms(community: Community | undefined, monthKey: string): PartnershipStatementProgram[] {
+  if (!community) return [];
+
+  const configuredPrograms = normalizeRecurringPrograms(community.recurringPrograms ?? []);
+  const staticPrograms = partnershipPrograms.filter((program) => program.communityId === community.id && program.period === monthKey);
+  const staticProgramByKey = new Map(staticPrograms.map((program) => [programKey(program.name), program]));
+  const configuredKeys = new Set(configuredPrograms.map((program) => programKey(program.name)));
+  const profileRows = configuredPrograms.map((program) => {
+    const matchingProgram = staticProgramByKey.get(programKey(program.name));
+    return {
+      activity: matchingProgram ? `${matchingProgram.jobsBooked} activities / ${matchingProgram.popularService}` : 'Manual monthly income entry',
+      glCode: program.glCode,
+      id: statementProgramId(community.id, monthKey, program.name),
+      identifier: program.identifier,
+      income: 0,
+      name: program.name,
+      period: monthKey,
+      pointsEarned: matchingProgram?.pointsEarned ?? 0,
+      pointsRedeemed: matchingProgram?.pointsRedeemed ?? 0,
+      status: program.glCode.trim() && program.identifier.trim() ? 'Ready' : 'Review',
+    } satisfies PartnershipStatementProgram;
+  });
+  const legacyRows = staticPrograms
+    .filter((program) => !configuredKeys.has(programKey(program.name)))
+    .map((program) => ({
+      activity: `${program.jobsBooked} activities / ${program.popularService}`,
+      glCode: program.glCode,
+      id: program.id,
+      identifier: shortIdentifierFromName(program.name),
+      income: 0,
+      name: program.name,
+      period: program.period,
+      pointsEarned: program.pointsEarned,
+      pointsRedeemed: program.pointsRedeemed,
+      status: program.status === 'Ready' && program.glCode.trim() ? 'Ready' : 'Review',
+    } satisfies PartnershipStatementProgram));
+
+  return [...profileRows, ...legacyRows];
+}
+
+function statementProgramId(communityId: string, monthKey: string, programName: string) {
+  const programSlug = profileIdFromName(programName).replace(/^partnership-/, 'program-');
+  return `${communityId}-${monthKey}-${programSlug}`;
+}
+
+function countConfiguredPartnershipPrograms(communities: Community[]) {
+  return communities.reduce((sum, community) => sum + normalizeRecurringPrograms(community.recurringPrograms ?? []).length, 0);
+}
+
+function normalizeRecurringPrograms(programs: Array<string | PartnershipProfileProgram>) {
   const seen = new Set<string>();
-  return programs.reduce<string[]>((list, program) => {
-    const normalized = program.trim().replace(/\s+/g, ' ');
-    const key = normalized.toLowerCase();
-    if (!normalized || seen.has(key)) return list;
+  return programs.reduce<PartnershipProfileProgram[]>((list, program) => {
+    const normalized = typeof program === 'string'
+      ? recurringProgramFromName(program)
+      : {
+          glCode: program.glCode.trim(),
+          identifier: (program.identifier.trim() || shortIdentifierFromName(program.name)).toUpperCase(),
+          name: program.name.trim().replace(/\s+/g, ' '),
+        };
+    const preset = recurringProgramPresetForName(normalized.name);
+    const hydrated = {
+      ...normalized,
+      glCode: normalized.glCode || preset.glCode,
+      identifier: normalized.identifier || preset.identifier,
+    };
+    const key = programKey(hydrated.name);
+    if (!key || seen.has(key)) return list;
     seen.add(key);
-    return [...list, normalized];
+    return [...list, hydrated];
   }, []);
+}
+
+function recurringProgramFromName(name: string): PartnershipProfileProgram {
+  const normalizedName = name.trim().replace(/\s+/g, ' ');
+  const preset = recurringProgramPresetForName(normalizedName);
+  return {
+    glCode: preset.glCode,
+    identifier: preset.identifier || shortIdentifierFromName(normalizedName),
+    name: normalizedName,
+  };
+}
+
+function recurringProgramPresetForName(name: string) {
+  return recurringProgramPresets.find((program) => programKey(program.name) === programKey(name)) ?? {
+    glCode: '',
+    identifier: '',
+    name,
+  };
+}
+
+function profileProgramLabel(program: PartnershipProfileProgram) {
+  return `${program.name} (${program.identifier || 'ID needed'} / ${program.glCode || 'GL needed'})`;
+}
+
+function shortIdentifierFromName(name: string) {
+  const identifier = name
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((part) => part.slice(0, 4))
+    .join('');
+  return identifier.slice(0, 12);
+}
+
+function programKey(name: string) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
