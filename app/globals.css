@@ -1977,6 +1977,233 @@ input::placeholder {
   width: fit-content;
 }
 
+.accounting-tabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.accounting-tabs button {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--ivory);
+  min-height: 46px;
+}
+
+.accounting-tabs button.active,
+.accounting-tabs button:hover {
+  border-color: rgba(212, 175, 55, 0.46);
+  background: rgba(212, 175, 55, 0.13);
+  color: #ffffff;
+}
+
+.accounting-workflow {
+  display: grid;
+  gap: 18px;
+}
+
+.accounting-preview-total {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  min-width: 150px;
+}
+
+.accounting-preview-total span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.accounting-preview-total strong {
+  color: var(--gold);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.accounting-control-grid,
+.queue-filter-bar {
+  display: grid;
+  align-items: end;
+  grid-template-columns: minmax(220px, 0.6fr) minmax(190px, 0.4fr) minmax(260px, 1fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.queue-filter-bar {
+  grid-template-columns: repeat(4, minmax(170px, 1fr));
+}
+
+.accounting-alert {
+  min-height: 42px;
+  border: 1px solid rgba(212, 175, 55, 0.28);
+  border-radius: 8px;
+  background: rgba(212, 175, 55, 0.08);
+  color: var(--gold);
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.35;
+  padding: 10px 12px;
+}
+
+.accounting-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-bottom: 14px;
+}
+
+.accounting-job-table,
+.partnership-table,
+.reconciliation-table {
+  display: grid;
+  overflow: hidden;
+  min-width: 1180px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+}
+
+.accounting-job-row,
+.partnership-row,
+.reconciliation-row {
+  display: grid;
+  gap: 10px;
+  align-items: center;
+  min-height: 54px;
+  border-top: 1px solid var(--line-soft);
+  padding: 11px 12px;
+}
+
+.accounting-job-row {
+  grid-template-columns: minmax(128px, 0.76fr) minmax(84px, 0.54fr) minmax(170px, 1.08fr) minmax(145px, 0.9fr) minmax(166px, 1fr) minmax(92px, 0.55fr) minmax(92px, 0.55fr) minmax(132px, 0.75fr) minmax(190px, 1.1fr) minmax(142px, 0.86fr) minmax(118px, 0.7fr);
+}
+
+.partnership-row {
+  grid-template-columns: minmax(132px, 0.72fr) minmax(150px, 1fr) minmax(120px, 0.72fr) minmax(120px, 0.62fr) minmax(100px, 0.6fr) minmax(104px, 0.58fr) minmax(150px, 0.9fr);
+}
+
+.reconciliation-row {
+  grid-template-columns: minmax(142px, 0.86fr) minmax(170px, 1fr) minmax(160px, 0.95fr) minmax(170px, 1fr) minmax(128px, 0.72fr) minmax(128px, 0.72fr) minmax(118px, 0.66fr) minmax(90px, 0.5fr) minmax(170px, 1fr);
+}
+
+.accounting-job-row.header,
+.partnership-row.header,
+.reconciliation-row.header {
+  min-height: 38px;
+  border-top: 0;
+  background: rgba(212, 175, 55, 0.06);
+  color: var(--gold);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.accounting-job-row strong,
+.partnership-row strong,
+.reconciliation-row strong {
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.accounting-job-row span,
+.partnership-row span,
+.reconciliation-row span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.28;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.accounting-job-row em,
+.partnership-row em,
+.reconciliation-row em {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.accounting-checkbox {
+  gap: 8px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.accounting-checkbox input {
+  flex: none;
+}
+
+.partnership-row input {
+  min-height: 36px;
+  padding-block: 7px;
+}
+
+.accounting-note-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.7fr) minmax(0, 1fr);
+  gap: 10px 14px;
+  margin-top: 15px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 13px;
+}
+
+.accounting-note-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.accounting-note-grid strong {
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.month-close-grid,
+.reporting-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.month-close-card {
+  display: grid;
+  gap: 16px;
+}
+
+.month-close-section {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 12px;
+}
+
+.month-close-section h3 {
+  margin: 0;
+  color: #ffffff;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.service-report-table {
+  min-width: 760px;
+}
+
 @media (max-width: 1280px) {
   .metric-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1991,7 +2218,10 @@ input::placeholder {
   .profile-summary-grid,
   .document-workflow-list,
   .reward-filter-bar,
-  .reward-control-grid {
+  .reward-control-grid,
+  .accounting-tabs,
+  .month-close-grid,
+  .reporting-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -2014,6 +2244,8 @@ input::placeholder {
   .split-grid,
   .job-grid,
   .statement-grid,
+  .month-close-grid,
+  .reporting-grid,
   .reward-control-grid {
     grid-template-columns: 1fr;
   }
@@ -2060,6 +2292,9 @@ input::placeholder {
   .task-grid,
   .statement-numbers,
   .vendor-month-summary,
+  .accounting-tabs,
+  .accounting-control-grid,
+  .queue-filter-bar,
   .manual-job-form,
   .task-search-bar,
   .reward-filter-bar,
@@ -2076,12 +2311,16 @@ input::placeholder {
   .open-statement-facts,
   .open-statement-item,
   .vendor-month-panel.invoice-mode .vendor-month-row,
+  .accounting-note-grid,
   .drilldown-row {
     grid-template-columns: 1fr;
   }
 
   .vendor-month-row.header,
-  .open-statement-item.header {
+  .open-statement-item.header,
+  .accounting-job-row.header,
+  .partnership-row.header,
+  .reconciliation-row.header {
     display: none;
   }
 

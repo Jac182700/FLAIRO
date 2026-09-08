@@ -9,16 +9,23 @@ type ModuleId =
   | 'board'
   | 'tasks'
   | 'rewards'
-  | 'invoices'
+  | 'accounting'
   | 'reports'
   | 'settings';
+
+type AccountingTab =
+  | 'vendor-billing'
+  | 'partnership-statements'
+  | 'reconciliation-queue'
+  | 'month-end-close'
+  | 'accounting-settings';
 
 type VendorStatus = 'Compliant' | 'Review needed' | 'Pending onboarding';
 type DocumentStatus = 'Verified' | 'Under review' | 'Needs upload' | 'Expiring';
 type VendorDocumentType = 'insurance' | 'license' | 'w9' | 'contract';
 type VendorMetricFilter = 'vendor-active' | 'vendor-review' | 'vendor-rating' | 'vendor-expiring';
-type BoardStatus = 'Open' | 'Claimed' | 'Scheduled' | 'Completed';
-type InvoiceStatus = 'Waiting' | 'Ready' | 'Draft queued' | 'Sent' | 'Paid' | 'Hold';
+type BoardStatus = 'Open' | 'Claimed' | 'Scheduled' | 'In Progress' | 'Completed' | 'Cancelled' | 'Refunded' | 'Disputed' | 'Reopened' | 'Pending';
+type InvoiceStatus = 'Waiting' | 'Ready' | 'Draft queued' | 'Sent' | 'Paid' | 'Hold' | 'Deferred' | 'Disputed' | 'Archived';
 type StatementStatus = 'Draft' | 'Ready' | 'Issued';
 type RewardStatus = 'Pending' | 'Available' | 'Redeemed' | 'Reversed' | 'Expired';
 
@@ -160,9 +167,44 @@ type InvoiceTrigger = {
   jobId: string;
   vendorId: string;
   amount: number;
+  billingMonth?: string;
   status: InvoiceStatus;
   dueDate: string;
   reference: string;
+};
+
+type PartnershipProgram = {
+  id: string;
+  communityId: string;
+  name: string;
+  period: string;
+  glCode: string;
+  income: number;
+  status: 'Ready' | 'Review' | 'Deferred';
+  adoption: number;
+  plusMemberships: number;
+  jobsBooked: number;
+  popularService: string;
+  pointsEarned: number;
+  pointsRedeemed: number;
+};
+
+type ReconciliationItem = {
+  id: string;
+  type: string;
+  item: string;
+  property: string;
+  vendor: string;
+  partner: string;
+  program: string;
+  servicePeriod: string;
+  billingCandidate: string;
+  jobStatus: string;
+  paymentStatus: string;
+  reconciliationStatus: string;
+  ageLabel: string;
+  suggestedAction: string;
+  amount: number;
 };
 
 type AuditEntry = {
@@ -289,9 +331,17 @@ const navSections: Array<{ id: ModuleId; label: string }> = [
   { id: 'board', label: 'Job Board' },
   { id: 'tasks', label: 'Open Tasks' },
   { id: 'rewards', label: 'Plume Points' },
-  { id: 'invoices', label: 'Invoices' },
-  { id: 'reports', label: 'Community Reports' },
+  { id: 'accounting', label: 'Accounting' },
+  { id: 'reports', label: 'Reporting' },
   { id: 'settings', label: 'Settings' },
+];
+
+const accountingTabs: Array<{ id: AccountingTab; label: string }> = [
+  { id: 'vendor-billing', label: 'Vendor Billing' },
+  { id: 'partnership-statements', label: 'Partnership Statements' },
+  { id: 'reconciliation-queue', label: 'Reconciliation Queue' },
+  { id: 'month-end-close', label: 'Month-End Close' },
+  { id: 'accounting-settings', label: 'Accounting Settings' },
 ];
 
 const MINUTE_MS = 60 * 1000;
@@ -738,6 +788,7 @@ const initialInvoices: InvoiceTrigger[] = [
     jobId: 'J-1050',
     vendorId: 'pink-palm',
     amount: 2.7,
+    billingMonth: '2026-09',
     status: 'Ready',
     dueDate: '2026-09-07',
     reference: 'Ready for monthly vendor statement',
@@ -747,9 +798,118 @@ const initialInvoices: InvoiceTrigger[] = [
     jobId: 'J-1038',
     vendorId: 'sparkle',
     amount: 118.4,
+    billingMonth: '2026-09',
     status: 'Draft queued',
     dueDate: '2026-09-05',
     reference: 'Added to vendor monthly statement',
+  },
+];
+
+const partnershipPrograms: PartnershipProgram[] = [
+  {
+    id: 'arbor-flairo-plus-2026-09',
+    communityId: 'arbor',
+    name: 'FLAIRO PLUS',
+    period: '2026-09',
+    glCode: '40950',
+    income: 1825,
+    status: 'Ready',
+    adoption: 36,
+    plusMemberships: 48,
+    jobsBooked: 21,
+    popularService: 'Recurring housekeeping',
+    pointsEarned: 8120,
+    pointsRedeemed: 2100,
+  },
+  {
+    id: 'arbor-resort-pass-2026-09',
+    communityId: 'arbor',
+    name: 'Resort Pass',
+    period: '2026-09',
+    glCode: '40970',
+    income: 760,
+    status: 'Ready',
+    adoption: 18,
+    plusMemberships: 48,
+    jobsBooked: 9,
+    popularService: 'Pool day pass',
+    pointsEarned: 0,
+    pointsRedeemed: 0,
+  },
+  {
+    id: 'arbor-pestshare-2026-09',
+    communityId: 'arbor',
+    name: 'PestShare',
+    period: '2026-09',
+    glCode: '40980',
+    income: 1188,
+    status: 'Review',
+    adoption: 24,
+    plusMemberships: 48,
+    jobsBooked: 14,
+    popularService: 'Recurring service',
+    pointsEarned: 0,
+    pointsRedeemed: 0,
+  },
+  {
+    id: 'solara-flairo-plus-2026-09',
+    communityId: 'solara',
+    name: 'FLAIRO PLUS',
+    period: '2026-09',
+    glCode: '40950',
+    income: 2265,
+    status: 'Ready',
+    adoption: 31,
+    plusMemberships: 61,
+    jobsBooked: 28,
+    popularService: 'Move-out deep cleaning',
+    pointsEarned: 9340,
+    pointsRedeemed: 2700,
+  },
+  {
+    id: 'solara-peerspace-2026-09',
+    communityId: 'solara',
+    name: 'PeerSpace',
+    period: '2026-09',
+    glCode: '40972',
+    income: 910,
+    status: 'Ready',
+    adoption: 14,
+    plusMemberships: 61,
+    jobsBooked: 6,
+    popularService: 'Amenity reservation',
+    pointsEarned: 0,
+    pointsRedeemed: 0,
+  },
+  {
+    id: 'sawgrass-flairo-plus-2026-09',
+    communityId: 'sawgrass',
+    name: 'FLAIRO PLUS',
+    period: '2026-09',
+    glCode: '40950',
+    income: 2659.76,
+    status: 'Ready',
+    adoption: 44,
+    plusMemberships: 73,
+    jobsBooked: 33,
+    popularService: 'Preferred movers',
+    pointsEarned: 11240,
+    pointsRedeemed: 3600,
+  },
+  {
+    id: 'sawgrass-wag-2026-09',
+    communityId: 'sawgrass',
+    name: 'Wag',
+    period: '2026-09',
+    glCode: '40990',
+    income: 540,
+    status: 'Review',
+    adoption: 12,
+    plusMemberships: 73,
+    jobsBooked: 11,
+    popularService: 'Dog walking and drop-ins',
+    pointsEarned: 0,
+    pointsRedeemed: 0,
   },
 ];
 
@@ -982,19 +1142,17 @@ export default function ControlCenter({
     const rewardLiability = rewards
       .filter((entry) => entry.status === 'Pending')
       .reduce((sum, entry) => sum + plumePointValue(entry.points, rewardSettings), 0);
-    const invoiceQueue = invoices
-      .filter((invoice) => invoice.status === 'Ready' || invoice.status === 'Draft queued')
-      .reduce((sum, invoice) => sum + invoice.amount, 0);
+    const accountingQueue = buildReconciliationItems(jobs, invoices, communities, vendors).length;
 
     return [
       { id: 'metric-board-jobs', label: 'Vendor-visible jobs', value: String(openBoard), detail: 'Open resident requests' },
       { id: 'metric-controlled-tasks', label: 'FLAIRO controlled tasks', value: String(controlledTasks), detail: 'Claimed, scheduled, or complete' },
       { id: 'metric-compliant-vendors', label: 'Compliant vendors', value: `${compliant}/${vendors.length}`, detail: 'Board access eligible' },
       { id: 'metric-reward-liability', label: 'Plume Point liability', value: dollars(rewardLiability), detail: 'Pending redemption value' },
-      { id: 'metric-invoice-queue', label: 'Statement queue', value: dollars(invoiceQueue), detail: 'Vendor fee records waiting for monthly closeout' },
+      { id: 'metric-invoice-queue', label: 'Reconciliation queue', value: String(accountingQueue), detail: 'Open accounting items remain visible until resolved' },
       { id: 'metric-plus-memberships', label: 'PLUS memberships', value: '182', detail: 'Across active communities' },
     ];
-  }, [invoices, jobs, rewardSettings, rewards, vendors]);
+  }, [communities, invoices, jobs, rewardSettings, rewards, vendors]);
 
   const addAudit = (action: string, detail: string) => {
     setAudit((current) => [
@@ -1339,7 +1497,7 @@ export default function ControlCenter({
         'Invoice already queued',
         `${existingInvoice.id} is already on ${vendorName(existingInvoice.vendorId, vendors)} monthly statement.`,
       );
-      openModuleRecord('invoices', `vendor-month-${existingInvoice.vendorId}`);
+      openModuleRecord('accounting', `vendor-month-${existingInvoice.vendorId}`);
       return;
     }
 
@@ -1362,8 +1520,87 @@ export default function ControlCenter({
       ),
     );
     addAudit('Invoice statement item', `${invoiceId} added ${job.id} to ${vendorName(job.vendorId, vendors)} monthly statement.`);
-    openModuleRecord('invoices', `vendor-month-${job.vendorId}`);
+    openModuleRecord('accounting', `vendor-month-${job.vendorId}`);
     void persistAction('trigger_invoice', { jobId });
+  };
+
+  const finalizeVendorInvoice = (vendorId: string, monthKey: string, jobIds: string[], reviewAcknowledged: boolean) => {
+    const selectedIds = new Set(jobIds);
+    const selectedJobs = jobs.filter((job) => selectedIds.has(job.id) && job.vendorId === vendorId);
+    if (!selectedJobs.length) {
+      addAudit('Vendor invoice waiting', `${vendorName(vendorId, vendors)} needs at least one selected job before finalizing.`);
+      return;
+    }
+
+    const activeInvoiceJobIds = new Set(
+      invoices
+        .filter((invoice) => invoice.status !== 'Hold' && invoice.status !== 'Paid')
+        .map((invoice) => invoice.jobId),
+    );
+    const invoiceNumberPrefix = `INV-M-${monthKey.replace('-', '')}`;
+    const selectedJobIds = new Set(selectedJobs.map((job) => job.id));
+
+    setInvoices((current) => {
+      const currentActiveJobIds = new Set(
+        current
+          .filter((invoice) => invoice.status !== 'Hold' && invoice.status !== 'Paid')
+          .map((invoice) => invoice.jobId),
+      );
+      const additions = selectedJobs
+        .filter((job) => !currentActiveJobIds.has(job.id))
+        .map((job) => ({
+          amount: job.flairoFee,
+          billingMonth: monthKey,
+          dueDate: 'Net 7',
+          id: `${invoiceNumberPrefix}-${job.id}`,
+          jobId: job.id,
+          reference: reviewAcknowledged && !jobRecommendedForReconciliation(job)
+            ? 'Included on vendor invoice with admin review acknowledgement'
+            : 'Included on vendor invoice',
+          status: 'Sent' as InvoiceStatus,
+          vendorId,
+        }));
+
+      return [
+        ...additions,
+        ...current.map((invoice) =>
+          selectedJobIds.has(invoice.jobId) && invoice.status !== 'Paid' && invoice.status !== 'Hold'
+            ? {
+                ...invoice,
+                billingMonth: monthKey,
+                reference: reviewAcknowledged
+                  ? 'Included on vendor invoice with admin review acknowledgement'
+                  : 'Included on vendor invoice',
+                status: 'Sent' as InvoiceStatus,
+              }
+            : invoice,
+        ),
+      ];
+    });
+
+    setJobs((current) =>
+      current.map((job) =>
+        selectedJobIds.has(job.id) ? { ...job, invoiceStatus: 'Sent' } : job,
+      ),
+    );
+
+    const newlyAttached = selectedJobs.filter((job) => !activeInvoiceJobIds.has(job.id)).length;
+    const reviewCount = selectedJobs.filter((job) => !jobRecommendedForReconciliation(job)).length;
+    addAudit(
+      'Vendor invoice finalized',
+      `${vendorName(vendorId, vendors)} ${labelMonth(monthKey)} invoice finalized with ${selectedJobs.length} selected job${selectedJobs.length === 1 ? '' : 's'}; ${reviewCount} required review and unselected jobs remain in Reconciliation Queue.`,
+    );
+    openModuleRecord('accounting', `vendor-month-${vendorId}`);
+    void persistAction('finalize_vendor_invoice', {
+      jobIdsJson: JSON.stringify(jobIds),
+      monthKey,
+      reviewAcknowledged,
+      vendorId,
+    });
+
+    if (!newlyAttached) {
+      setSyncStatus('Existing invoice records updated for selected jobs');
+    }
   };
 
   const reactivateJob = (jobId: string) => {
@@ -1644,37 +1881,6 @@ export default function ControlCenter({
     void persistAction('run_expiration_batch', { reminderDays });
   };
 
-  const processVendorMonth = (vendorId: string, monthKey: string) => {
-    const readyJobs = jobs.filter(
-      (job) =>
-        job.vendorId === vendorId &&
-        jobInMonth(job, monthKey) &&
-        job.invoiceStatus !== 'Sent' &&
-        job.invoiceStatus !== 'Paid' &&
-        jobInvoiceActionable(job),
-    );
-    if (!readyJobs.length) {
-      addAudit('Month closeout waiting', `${vendorName(vendorId, vendors)} has no invoice-ready jobs for ${labelMonth(monthKey)}.`);
-      return;
-    }
-
-    const readyJobIds = new Set(readyJobs.map((job) => job.id));
-    setJobs((current) =>
-      current.map((job) =>
-        readyJobIds.has(job.id) ? { ...job, invoiceStatus: 'Sent' } : job,
-      ),
-    );
-    setInvoices((current) =>
-      current.map((invoice) =>
-        readyJobIds.has(invoice.jobId)
-          ? { ...invoice, status: 'Sent', reference: 'Included on vendor monthly statement' }
-          : invoice,
-      ),
-    );
-    addAudit('Vendor month processed', `${vendorName(vendorId, vendors)} ${labelMonth(monthKey)} monthly statement processed; job-level tally reset.`);
-    void persistAction('process_vendor_month', { monthKey, vendorId });
-  };
-
   const markVendorStatementPaid = (vendorId: string, monthKey: string) => {
     const statementInvoices = invoices.filter(
       (invoice) =>
@@ -1706,14 +1912,27 @@ export default function ControlCenter({
     void persistAction('mark_vendor_statement_paid', { monthKey, vendorId });
   };
 
-  const markStatementIssued = (communityId: string) => {
+  const finalizePartnershipStatement = (communityId: string, monthKey: string, programIds: string[], reviewAcknowledged: boolean) => {
+    if (!programIds.length) {
+      addAudit('Partnership statement waiting', `${communityName(communityId, communities)} needs at least one selected program before issuing.`);
+      return;
+    }
     setCommunities((current) =>
       current.map((community) =>
         community.id === communityId ? { ...community, statementStatus: 'Issued' } : community,
       ),
     );
-    addAudit('Statement issued', `${communityName(communityId, communities)} statement marked issued.`);
-    void persistAction('mark_statement_issued', { communityId });
+    const reviewPrograms = partnershipPrograms.filter((program) => programIds.includes(program.id) && program.status !== 'Ready').length;
+    addAudit(
+      'Partnership statement issued',
+      `${communityName(communityId, communities)} ${labelMonth(monthKey)} statement issued with ${programIds.length} selected program${programIds.length === 1 ? '' : 's'}; ${reviewPrograms} required review and excluded items remain in Reconciliation Queue.`,
+    );
+    void persistAction('finalize_partnership_statement', {
+      communityId,
+      monthKey,
+      programIdsJson: JSON.stringify(programIds),
+      reviewAcknowledged,
+    });
   };
 
   const pushMobileUpdate = async () => {
@@ -1894,14 +2113,16 @@ export default function ControlCenter({
           />
         )}
 
-        {activeModule === 'invoices' && (
-          <InvoicesModule
+        {activeModule === 'accounting' && (
+          <AccountingModule
+            communities={communities}
+            finalizePartnershipStatement={finalizePartnershipStatement}
+            finalizeVendorInvoice={finalizeVendorInvoice}
             invoices={invoices}
             jobs={jobs}
-            highlightRecordId={activeModule === 'invoices' ? focusTarget?.recordId : null}
+            highlightRecordId={activeModule === 'accounting' ? focusTarget?.recordId : null}
             markVendorStatementPaid={markVendorStatementPaid}
-            processVendorMonth={processVendorMonth}
-            triggerInvoice={triggerInvoice}
+            rewards={rewards}
             vendors={vendors}
           />
         )}
@@ -1909,8 +2130,9 @@ export default function ControlCenter({
         {activeModule === 'reports' && (
           <ReportsModule
             communities={communities}
-            highlightRecordId={activeModule === 'reports' ? focusTarget?.recordId : null}
-            markStatementIssued={markStatementIssued}
+            jobs={jobs}
+            rewards={rewards}
+            vendors={vendors}
           />
         )}
 
@@ -1948,10 +2170,13 @@ function CommandModule({
   const readyStatements = communities.filter((community) => community.statementStatus === 'Ready');
   const invoiceQueue = invoices.filter((invoice) => invoice.status === 'Ready' || invoice.status === 'Draft queued');
   const queuedInvoiceJobIds = new Set(invoiceQueue.map((invoice) => invoice.jobId));
+  const reconciliationItems = buildReconciliationItems(jobs, invoices, communities, vendors);
   const readyInvoiceJobs = jobs.filter(
     (job) =>
       job.vendorId &&
-      job.invoiceStatus === 'Ready' &&
+      job.invoiceStatus !== 'Sent' &&
+      job.invoiceStatus !== 'Paid' &&
+      jobRecommendedForReconciliation(job) &&
       !queuedInvoiceJobIds.has(job.id),
   );
   const activeRewardEntries = rewards.filter((entry) => entry.status === 'Available' || entry.status === 'Pending');
@@ -1976,7 +2201,7 @@ function CommandModule({
     id: `board-${job.id}`,
   }));
   const priorityStatementRows: DrilldownRow[] = readyStatements.map((community) => ({
-    action: { label: 'Open report', module: 'reports', recordId: `statement-${community.id}` },
+    action: { label: 'Open accounting', module: 'accounting', recordId: `statement-${community.id}` },
     cells: [
       community.name,
       community.manager,
@@ -1987,17 +2212,17 @@ function CommandModule({
   }));
   const priorityInvoiceRows: DrilldownRow[] = [
     ...readyInvoiceJobs.map((job) => ({
-      action: { label: 'Process', module: 'invoices' as ModuleId, recordId: `vendor-month-${job.vendorId}` },
+      action: { label: 'Review', module: 'accounting' as ModuleId, recordId: `vendor-month-${job.vendorId}` },
       cells: [
         job.id,
         job.vendorId ? vendorName(job.vendorId, vendors) : 'Vendor needed',
-        'Ready for monthly statement',
+        'Recommended: completed + paid',
         dollars(job.flairoFee),
       ],
       id: `invoice-ready-${job.id}`,
     })),
     ...invoiceQueue.map((invoice) => ({
-      action: { label: 'Open statement', module: 'invoices' as ModuleId, recordId: `vendor-month-${invoice.vendorId}` },
+      action: { label: 'Open invoice', module: 'accounting' as ModuleId, recordId: `vendor-month-${invoice.vendorId}` },
       cells: [
         invoice.id,
         vendorName(invoice.vendorId, vendors),
@@ -2025,16 +2250,16 @@ function CommandModule({
     },
     {
       id: 'priority-statements',
-      label: 'Statements ready',
+      label: 'Partner statements',
       count: String(priorityStatementRows.length),
-      detail: 'Community income reports ready to review, export, or mark issued.',
+      detail: 'Partnership income statements ready for Accounting review.',
       rows: priorityStatementRows,
     },
     {
       id: 'priority-invoices',
-      label: 'Vendor invoice statements',
+      label: 'Vendor billing',
       count: String(priorityInvoiceRows.length),
-      detail: 'Completed jobs and invoice records that should roll into monthly vendor statements.',
+      detail: 'Recommended jobs and invoice records waiting for vendor billing review.',
       rows: priorityInvoiceRows,
     },
   ];
@@ -2106,18 +2331,18 @@ function CommandModule({
     },
     {
       id: 'metric-invoice-queue',
-      label: 'Statement queue',
-      count: dollars(invoiceQueue.reduce((sum, invoice) => sum + invoice.amount, 0)),
-      detail: 'Vendor fee records waiting for or already queued to monthly closeout.',
-      rows: invoiceQueue.map((invoice) => ({
-        action: { label: 'Open statement', module: 'invoices', recordId: `vendor-month-${invoice.vendorId}` },
+      label: 'Reconciliation queue',
+      count: String(reconciliationItems.length),
+      detail: 'Vendor fee records waiting for Accounting review or payment matching.',
+      rows: reconciliationItems.map((item) => ({
+        action: { label: 'Open queue', module: 'accounting', recordId: item.id },
         cells: [
-          invoice.id,
-          invoice.jobId,
-          vendorName(invoice.vendorId, vendors),
-          `${invoice.status} / ${dollars(invoice.amount)}`,
+          item.item,
+          item.type,
+          item.reconciliationStatus,
+          item.suggestedAction,
         ],
-        id: `metric-invoice-${invoice.id}`,
+        id: item.id,
       })),
     },
     {
@@ -2126,7 +2351,7 @@ function CommandModule({
       count: String(communities.reduce((sum, community) => sum + community.plusMembers, 0)),
       detail: 'Paid recurring FLAIRO PLUS memberships by community.',
       rows: communities.map((community) => ({
-        action: { label: 'Open report', module: 'reports', recordId: `statement-${community.id}` },
+        action: { label: 'Open reporting', module: 'reports', recordId: `report-${community.id}` },
         cells: [
           community.name,
           `${community.plusMembers} PLUS members`,
@@ -2197,7 +2422,7 @@ function CommandModule({
 
       <VendorMonthCloseoutPanel
         jobs={jobs}
-        onOpenInvoices={() => onOpenRecord('invoices', 'vendor-month-panel')}
+        onOpenInvoices={() => onOpenRecord('accounting', 'vendor-month-panel')}
         vendors={vendors}
       />
     </>
@@ -3758,88 +3983,304 @@ function RewardsModule({
   );
 }
 
-function InvoicesModule({
+function AccountingModule({
+  communities,
+  finalizePartnershipStatement,
+  finalizeVendorInvoice,
   highlightRecordId,
   invoices,
   jobs,
   markVendorStatementPaid,
-  processVendorMonth,
-  triggerInvoice,
+  rewards,
   vendors,
 }: {
+  communities: Community[];
+  finalizePartnershipStatement: (communityId: string, monthKey: string, programIds: string[], reviewAcknowledged: boolean) => void;
+  finalizeVendorInvoice: (vendorId: string, monthKey: string, jobIds: string[], reviewAcknowledged: boolean) => void;
   highlightRecordId?: string | null;
   invoices: InvoiceTrigger[];
   jobs: Job[];
   markVendorStatementPaid: (vendorId: string, monthKey: string) => void;
-  processVendorMonth: (vendorId: string, monthKey: string) => void;
-  triggerInvoice: (jobId: string) => void;
+  rewards: RewardEntry[];
   vendors: Vendor[];
 }) {
-  const activeInvoices = invoices.filter((invoice) => invoice.status !== 'Hold' && invoice.status !== 'Paid');
-  const queuedJobIds = new Set(activeInvoices.map((invoice) => invoice.jobId));
+  const [activeTab, setActiveTab] = useState<AccountingTab>(() => accountingTabFromHighlight(highlightRecordId));
+  const reconciliationItems = buildReconciliationItems(jobs, invoices, communities, vendors);
   const openStatements = buildOpenVendorStatements(invoices, jobs, vendors);
-  const readyJobs = jobs.filter(
-    (job) =>
-      job.invoiceStatus !== 'Sent' &&
-      job.invoiceStatus !== 'Paid' &&
-      jobInvoiceActionable(job) &&
-      !queuedJobIds.has(job.id),
-  );
+  const recommendedJobs = jobs.filter(jobRecommendedForReconciliation).length;
+  const reviewJobs = jobs.filter((job) => job.vendorId && !jobRecommendedForReconciliation(job) && job.invoiceStatus !== 'Paid').length;
 
   return (
     <>
       <section className="section-band">
         <div>
-          <p className="eyebrow">Invoice processing</p>
-          <h2>Job fee records roll into one monthly vendor statement for FLAIRO invoicing.</h2>
+          <p className="eyebrow">Accounting</p>
+          <h2>Vendor billing, partner statements, reconciliation, and month-end close.</h2>
         </div>
         <div className="integration-strip">
-          <StatusPill label="Bluevine account" status="Monthly statement draft" />
-          <StatusPill label="Resident payment" status="Vendor direct" />
-          <StatusPill label="Closeout" status="Vendor-by-vendor" />
+          <StatusPill label="Recommendation" status="Completed + Resident Paid" />
+          <StatusPill label="Selection" status="Admin controlled" />
+          <StatusPill label="Open items" status="Never auto-archived" />
         </div>
       </section>
 
-      <VendorMonthCloseoutPanel
-        highlightRecordId={highlightRecordId}
-        invoiceMode
-        jobs={jobs}
-        processVendorMonth={processVendorMonth}
-        vendors={vendors}
+      <MetricGrid
+        metrics={[
+          { label: 'Recommended jobs', value: String(recommendedJobs), detail: 'Completed + Resident Paid' },
+          { label: 'Requires review', value: String(reviewJobs), detail: 'Available with acknowledgement' },
+          { label: 'Open reconciliation', value: String(reconciliationItems.length), detail: 'Visible until resolved' },
+          { label: 'Open invoices', value: String(openStatements.length), detail: 'Vendor billing in progress' },
+          { label: 'Partner programs', value: String(partnershipPrograms.length), detail: 'Configured statement lines' },
+          { label: 'Reward ledger', value: String(rewards.length), detail: 'Plume Point activity' },
+        ]}
       />
+
+      <div className="accounting-tabs" role="tablist" aria-label="Accounting sections">
+        {accountingTabs.map((tab) => (
+          <button
+            aria-pressed={activeTab === tab.id}
+            className={activeTab === tab.id ? 'active' : ''}
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            type="button"
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'vendor-billing' && (
+        <VendorBillingWorkflow
+          communities={communities}
+          finalizeVendorInvoice={finalizeVendorInvoice}
+          highlightRecordId={highlightRecordId}
+          invoices={invoices}
+          jobs={jobs}
+          markVendorStatementPaid={markVendorStatementPaid}
+          openStatements={openStatements}
+          vendors={vendors}
+        />
+      )}
+
+      {activeTab === 'partnership-statements' && (
+        <PartnershipStatementsWorkflow
+          communities={communities}
+          finalizePartnershipStatement={finalizePartnershipStatement}
+          highlightRecordId={highlightRecordId}
+        />
+      )}
+
+      {activeTab === 'reconciliation-queue' && (
+        <ReconciliationQueueWorkspace
+          items={reconciliationItems}
+          vendors={vendors}
+        />
+      )}
+
+      {activeTab === 'month-end-close' && (
+        <MonthEndCloseWorkspace
+          communities={communities}
+          invoices={invoices}
+          items={reconciliationItems}
+          jobs={jobs}
+          vendors={vendors}
+        />
+      )}
+
+      {activeTab === 'accounting-settings' && (
+        <AccountingSettingsWorkspace communities={communities} vendors={vendors} />
+      )}
+    </>
+  );
+}
+
+function VendorBillingWorkflow({
+  communities,
+  finalizeVendorInvoice,
+  highlightRecordId,
+  invoices,
+  jobs,
+  markVendorStatementPaid,
+  openStatements,
+  vendors,
+}: {
+  communities: Community[];
+  finalizeVendorInvoice: (vendorId: string, monthKey: string, jobIds: string[], reviewAcknowledged: boolean) => void;
+  highlightRecordId?: string | null;
+  invoices: InvoiceTrigger[];
+  jobs: Job[];
+  markVendorStatementPaid: (vendorId: string, monthKey: string) => void;
+  openStatements: OpenVendorStatement[];
+  vendors: Vendor[];
+}) {
+  const activeVendors = vendors.filter((vendor) => vendor.boardAccess || vendor.preferred || jobs.some((job) => job.vendorId === vendor.id));
+  const [vendorId, setVendorId] = useState(() => vendorIdFromHighlight(highlightRecordId, vendors, activeVendors[0]?.id ?? vendors[0]?.id ?? ''));
+  const [monthKey, setMonthKey] = useState(currentMonthKey());
+  const [jobSelection, setJobSelection] = useState<{ ids: string[]; key: string }>({ ids: [], key: '' });
+  const monthChoices = accountingMonthChoices(jobs, invoices);
+  const selectionKey = `${vendorId}-${monthKey}`;
+  const selectedJobIds = jobSelection.key === selectionKey ? jobSelection.ids : [];
+
+  const candidateJobs = useMemo(
+    () => buildVendorBillingCandidates(jobs, invoices, vendorId, monthKey),
+    [invoices, jobs, monthKey, vendorId],
+  );
+  const recommendedJobs = candidateJobs.filter(jobRecommendedForReconciliation);
+  const selectedJobs = candidateJobs.filter((job) => selectedJobIds.includes(job.id));
+  const reviewSelectedJobs = selectedJobs.filter((job) => !jobRecommendedForReconciliation(job));
+  const grossTotal = selectedJobs.reduce((sum, job) => sum + job.amount, 0);
+  const flairoDue = selectedJobs.reduce((sum, job) => sum + job.flairoFee, 0);
+  const selectedVendor = vendors.find((vendor) => vendor.id === vendorId);
+
+  const setSelection = (jobId: string, checked: boolean) => {
+    setJobSelection((current) => {
+      const next = new Set(current.key === selectionKey ? current.ids : []);
+      if (checked) next.add(jobId);
+      else next.delete(jobId);
+      return { ids: Array.from(next), key: selectionKey };
+    });
+  };
+
+  const replaceSelection = (ids: string[]) => setJobSelection({ ids, key: selectionKey });
+
+  const finalizeSelection = () => {
+    if (reviewSelectedJobs.length) {
+      const confirmed = window.confirm('Some selected jobs are outside the Completed + Resident Paid recommendation. Finalize with admin acknowledgement?');
+      if (!confirmed) return;
+    }
+    finalizeVendorInvoice(vendorId, monthKey, selectedJobIds, reviewSelectedJobs.length > 0);
+    replaceSelection([]);
+  };
+
+  return (
+    <section className="accounting-workflow">
+      <div className="table-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Vendor Billing</p>
+            <h2>Build vendor invoices from selected job records.</h2>
+          </div>
+          <div className="accounting-preview-total">
+            <span>Invoice total</span>
+            <strong>{dollars(flairoDue)}</strong>
+          </div>
+        </div>
+
+        <div className="accounting-control-grid">
+          <label>
+            Vendor
+            <select value={vendorId} onChange={(event) => setVendorId(event.target.value)}>
+              {activeVendors.map((vendor) => (
+                <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Billing month
+            <select value={monthKey} onChange={(event) => setMonthKey(event.target.value)}>
+              {monthChoices.map((choice) => (
+                <option key={choice} value={choice}>{labelMonth(choice)}</option>
+              ))}
+            </select>
+          </label>
+          <div className="accounting-alert">
+            Recommended for reconciliation: Completed + Resident Paid jobs.
+          </div>
+        </div>
+
+        <div className="accounting-action-row">
+          <button type="button" onClick={() => replaceSelection(recommendedJobs.map((job) => job.id))}>
+            Select All Recommended
+          </button>
+          <button className="secondary-action" type="button" onClick={() => replaceSelection(candidateJobs.map((job) => job.id))}>
+            Select All
+          </button>
+          <button className="secondary-action" type="button" onClick={() => replaceSelection([])}>
+            Clear Selection
+          </button>
+        </div>
+
+        <div className="accounting-job-table" role="table" aria-label="vendor billing reconciliation">
+          <div className="accounting-job-row header" role="row">
+            <span>Include</span>
+            <span>Job</span>
+            <span>Property / Resident</span>
+            <span>Service</span>
+            <span>Periods</span>
+            <span>Job Cost</span>
+            <span>FLAIRO Due</span>
+            <span>Status</span>
+            <span>Payment</span>
+            <span>Verification</span>
+            <span>Billing</span>
+          </div>
+          {candidateJobs.length ? candidateJobs.map((job) => {
+            const recommended = jobRecommendedForReconciliation(job);
+            const invoice = invoices.find((item) => item.jobId === job.id && item.status !== 'Hold' && item.status !== 'Paid');
+            return (
+              <div
+                className={`accounting-job-row${highlightRecordId === `invoice-ready-${job.id}` || highlightRecordId === `statement-job-${job.id}` ? ' record-highlight' : ''}`}
+                data-record-id={`accounting-job-${job.id}`}
+                key={job.id}
+                role="row"
+              >
+                <label className="check-control accounting-checkbox">
+                  <input
+                    checked={selectedJobIds.includes(job.id)}
+                    onChange={(event) => setSelection(job.id, event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>{recommended ? 'Recommended' : 'Review'}</span>
+                </label>
+                <strong>{job.id}<em>Unit {job.unit}</em></strong>
+                <span>{communityName(job.communityId, communities)}<em>{job.resident}</em></span>
+                <span>{job.service}<em>{selectedVendor?.feePercent ?? 0}% contract</em></span>
+                <span>Service {labelMonth(job.serviceDate.slice(0, 7))}<em>Billing {labelMonth(monthKey)}</em></span>
+                <span>{dollars(job.amount)}</span>
+                <span>{dollars(job.flairoFee)}</span>
+                <span><b className={`status ${recommended ? 'good' : 'review'}`}>{recommended ? 'Recommended' : 'Requires Review'}</b><em>{job.boardStatus}</em></span>
+                <span>{paymentSummary(job)}<em>{paymentDetail(job)}</em></span>
+                <span>{paymentVerificationSource(job)}</span>
+                <span>{jobVendorBillingStatus(job, invoice)}</span>
+              </div>
+            );
+          }) : (
+            <div className="empty-note table-empty">No vendor jobs match this billing period.</div>
+          )}
+        </div>
+      </div>
 
       <section className="split-grid">
         <div className="table-panel">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">Ready jobs</p>
-              <h2>Add job records to monthly statements</h2>
+              <p className="eyebrow">Invoice Preview</p>
+              <h2>{selectedVendor?.name ?? 'Vendor'} / {labelMonth(monthKey)}</h2>
             </div>
+            <button disabled={!selectedJobIds.length} type="button" onClick={finalizeSelection}>
+              Finalize Vendor Invoice
+            </button>
           </div>
-          <div className="task-stack compact">
-            {readyJobs.length ? readyJobs.map((job) => (
-              <article
-                className={`invoice-ready-row${highlightRecordId === `invoice-ready-${job.id}` ? ' record-highlight' : ''}`}
-                data-record-id={`invoice-ready-${job.id}`}
-                key={job.id}
-              >
-                <div>
-                  <strong>{job.id} / {job.service}</strong>
-                  <p>{job.vendorId ? vendorName(job.vendorId, vendors) : 'Vendor needed'} monthly statement item: {dollars(job.flairoFee)}</p>
-                </div>
-                <button type="button" onClick={() => triggerInvoice(job.id)}>
-                  Add to statement
-                </button>
-              </article>
-            )) : <p className="empty-note">No jobs are invoice-ready right now.</p>}
+          <div className="open-statement-facts">
+            <InfoTile label="Selected jobs" value={String(selectedJobs.length)} />
+            <InfoTile label="Gross job value" value={dollars(grossTotal)} />
+            <InfoTile label="FLAIRO amount due" value={dollars(flairoDue)} />
+          </div>
+          <div className="accounting-note-grid">
+            <span>Adjustments</span>
+            <strong>$0</strong>
+            <span>Memo</span>
+            <strong>Admin-selected job set</strong>
+            <span>Requires acknowledgement</span>
+            <strong>{reviewSelectedJobs.length ? `${reviewSelectedJobs.length} job${reviewSelectedJobs.length === 1 ? '' : 's'}` : 'None'}</strong>
           </div>
         </div>
 
         <div className="table-panel open-statement-panel">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">Open unpaid statements</p>
-              <h2>Running vendor invoice statements</h2>
+              <p className="eyebrow">Open Vendor Invoices</p>
+              <h2>Payment tracking</h2>
             </div>
           </div>
           <div className="open-statement-stack">
@@ -3852,20 +4293,20 @@ function InvoicesModule({
                 <div className="open-statement-head">
                   <div>
                     <h3>{statement.vendor.name}</h3>
-                    <p>{labelMonth(statement.monthKey)} / {statement.jobCount} job record{statement.jobCount === 1 ? '' : 's'}</p>
+                    <p>{labelMonth(statement.monthKey)} billing / {statement.jobCount} job record{statement.jobCount === 1 ? '' : 's'}</p>
                   </div>
                   <strong>{dollars(statement.amount)}</strong>
                 </div>
                 <div className="open-statement-facts">
-                  <InfoTile label="Statement status" value={statement.status} />
+                  <InfoTile label="Invoice status" value={statement.status} />
                   <InfoTile label="Due / follow-up" value={statement.dueLabel} />
-                  <InfoTile label="Collection" value="Managed manually until Bluevine connection" />
+                  <InfoTile label="Payment tracking" value="Manual until connected" />
                 </div>
-                <div className="open-statement-items" aria-label={`${statement.vendor.name} unpaid statement job records`}>
+                <div className="open-statement-items" aria-label={`${statement.vendor.name} unpaid invoice job records`}>
                   <div className="open-statement-item header">
                     <span>Invoice</span>
                     <span>Job</span>
-                    <span>Service</span>
+                    <span>Service Period</span>
                     <span>FLAIRO due</span>
                   </div>
                   {statement.invoices.map((invoice) => {
@@ -3878,7 +4319,7 @@ function InvoicesModule({
                       >
                         <span>{invoice.id}</span>
                         <span>{invoice.jobId}</span>
-                        <span>{job?.service ?? invoice.reference}</span>
+                        <span>{job ? labelMonth(job.serviceDate.slice(0, 7)) : invoice.reference}</span>
                         <strong>{dollars(invoice.amount)}</strong>
                       </div>
                     );
@@ -3888,100 +4329,525 @@ function InvoicesModule({
                   Mark paid manually
                 </button>
               </article>
-            )) : <p className="empty-note">No open unpaid vendor statements right now.</p>}
+            )) : <p className="empty-note">No open unpaid vendor invoices right now.</p>}
           </div>
         </div>
       </section>
-    </>
+    </section>
+  );
+}
+
+function PartnershipStatementsWorkflow({
+  communities,
+  finalizePartnershipStatement,
+  highlightRecordId,
+}: {
+  communities: Community[];
+  finalizePartnershipStatement: (communityId: string, monthKey: string, programIds: string[], reviewAcknowledged: boolean) => void;
+  highlightRecordId?: string | null;
+}) {
+  const [communityId, setCommunityId] = useState(() => communityIdFromHighlight(highlightRecordId, communities, communities[0]?.id ?? ''));
+  const [monthKey, setMonthKey] = useState(currentMonthKey());
+  const [programSelection, setProgramSelection] = useState<{ ids: string[]; key: string }>({ ids: [], key: '' });
+  const [glOverrides, setGlOverrides] = useState<Record<string, string>>({});
+  const selectionKey = `${communityId}-${monthKey}`;
+  const selectedProgramIds = programSelection.key === selectionKey ? programSelection.ids : [];
+  const monthChoices = accountingMonthChoices([], []).concat(
+    partnershipPrograms
+      .map((program) => program.period)
+      .filter((period, index, periods) => periods.indexOf(period) === index),
+  ).filter((period, index, periods) => periods.indexOf(period) === index);
+
+  const programs = partnershipPrograms.filter((program) => program.communityId === communityId && program.period === monthKey);
+  const readyPrograms = programs.filter((program) => program.status === 'Ready');
+  const selectedPrograms = programs.filter((program) => selectedProgramIds.includes(program.id));
+  const reviewPrograms = selectedPrograms.filter((program) => program.status !== 'Ready');
+  const selectedIncome = selectedPrograms.reduce((sum, program) => sum + program.income, 0);
+  const community = communities.find((item) => item.id === communityId);
+
+  const toggleProgramSelection = (programId: string, checked: boolean) => {
+    setProgramSelection((current) => {
+      const next = new Set(current.key === selectionKey ? current.ids : []);
+      if (checked) next.add(programId);
+      else next.delete(programId);
+      return { ids: Array.from(next), key: selectionKey };
+    });
+  };
+
+  const replaceProgramSelection = (ids: string[]) => setProgramSelection({ ids, key: selectionKey });
+
+  const finalizeStatement = () => {
+    if (reviewPrograms.length) {
+      const confirmed = window.confirm('Some selected programs require review. Issue the partnership statement with admin acknowledgement?');
+      if (!confirmed) return;
+    }
+    finalizePartnershipStatement(communityId, monthKey, selectedProgramIds, reviewPrograms.length > 0);
+    replaceProgramSelection([]);
+  };
+
+  return (
+    <section className="accounting-workflow">
+      <div className="table-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Partnership Statements</p>
+            <h2>Program income statement processing.</h2>
+          </div>
+          <div className="accounting-preview-total">
+            <span>Total payout</span>
+            <strong>{dollars(selectedIncome)}</strong>
+          </div>
+        </div>
+
+        <div className="accounting-control-grid">
+          <label>
+            Community
+            <select value={communityId} onChange={(event) => setCommunityId(event.target.value)}>
+              {communities.map((item) => (
+                <option key={item.id} value={item.id}>{item.name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Statement month
+            <select value={monthKey} onChange={(event) => setMonthKey(event.target.value)}>
+              {monthChoices.map((choice) => (
+                <option key={choice} value={choice}>{labelMonth(choice)}</option>
+              ))}
+            </select>
+          </label>
+          <div className="accounting-alert">
+            Preferred vendor referral fees stay in Vendor Billing.
+          </div>
+        </div>
+
+        <div className="accounting-action-row">
+          <button type="button" onClick={() => replaceProgramSelection(readyPrograms.map((program) => program.id))}>
+            Select Ready Programs
+          </button>
+          <button className="secondary-action" type="button" onClick={() => replaceProgramSelection(programs.map((program) => program.id))}>
+            Select All
+          </button>
+          <button className="secondary-action" type="button" onClick={() => replaceProgramSelection([])}>
+            Clear Selection
+          </button>
+        </div>
+
+        <div className="partnership-table" role="table" aria-label="partnership statement programs">
+          <div className="partnership-row header" role="row">
+            <span>Include</span>
+            <span>Program</span>
+            <span>Period</span>
+            <span>GL Code</span>
+            <span>Income</span>
+            <span>Status</span>
+            <span>Activity</span>
+          </div>
+          {programs.length ? programs.map((program) => (
+            <div
+              className={`partnership-row${highlightRecordId === `program-${program.id}` ? ' record-highlight' : ''}`}
+              data-record-id={`program-${program.id}`}
+              key={program.id}
+              role="row"
+            >
+              <label className="check-control accounting-checkbox">
+                <input
+                  checked={selectedProgramIds.includes(program.id)}
+                  onChange={(event) => toggleProgramSelection(program.id, event.target.checked)}
+                  type="checkbox"
+                />
+                <span>{program.status}</span>
+              </label>
+              <strong>{program.name}</strong>
+              <span>{labelMonth(program.period)}</span>
+              <input
+                aria-label={`${program.name} GL code`}
+                onChange={(event) => setGlOverrides((current) => ({ ...current, [program.id]: event.target.value }))}
+                value={glOverrides[program.id] ?? program.glCode}
+              />
+              <span>{dollars(program.income)}</span>
+              <span><b className={`status ${program.status === 'Ready' ? 'good' : 'review'}`}>{program.status}</b></span>
+              <span>{program.jobsBooked} activities<em>{program.popularService}</em></span>
+            </div>
+          )) : (
+            <div className="empty-note table-empty">No program income lines match this statement month.</div>
+          )}
+        </div>
+      </div>
+
+      <section className="split-grid">
+        <div className="table-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Statement Preview</p>
+              <h2>{community?.name ?? 'Community'} / {labelMonth(monthKey)}</h2>
+            </div>
+            <button disabled={!selectedProgramIds.length} type="button" onClick={finalizeStatement}>
+              Issue Partnership Statement
+            </button>
+          </div>
+          <div className="open-statement-facts">
+            <InfoTile label="Programs selected" value={String(selectedPrograms.length)} />
+            <InfoTile label="Total payout" value={dollars(selectedIncome)} />
+            <InfoTile label="Review lines" value={String(reviewPrograms.length)} />
+          </div>
+          <div className="accounting-note-grid">
+            <span>RBP participation</span>
+            <strong>{percent(community?.servicePenetration ?? 0)}</strong>
+            <span>FLAIRO PLUS memberships</span>
+            <strong>{String(community?.plusMembers ?? 0)}</strong>
+            <span>Points earned / redeemed</span>
+            <strong>{selectedPrograms.reduce((sum, program) => sum + program.pointsEarned, 0).toLocaleString()} / {selectedPrograms.reduce((sum, program) => sum + program.pointsRedeemed, 0).toLocaleString()}</strong>
+          </div>
+        </div>
+
+        <div className="table-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Partnership Profile</p>
+              <h2>{community?.manager ?? 'Ownership partner'}</h2>
+            </div>
+          </div>
+          <div className="rule-list">
+            <InfoTile label="Statement recipient" value="Accounting POC on partnership profile" />
+            <InfoTile label="Payment instructions" value="Profile default" />
+            <InfoTile label="Default GL handling" value="Program configuration with override audit" />
+            <InfoTile label="Financial documents" value="Statement history and payment history retained" />
+          </div>
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function ReconciliationQueueWorkspace({
+  items,
+  vendors,
+}: {
+  items: ReconciliationItem[];
+  vendors: Vendor[];
+}) {
+  const [typeFilter, setTypeFilter] = useState('All');
+  const [vendorFilter, setVendorFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [monthFilter, setMonthFilter] = useState('All');
+  const monthChoices = Array.from(new Set(items.map((item) => item.servicePeriod))).sort().reverse();
+  const filteredItems = items.filter((item) =>
+    (typeFilter === 'All' || item.type === typeFilter) &&
+    (vendorFilter === 'All' || item.vendor === vendorFilter) &&
+    (statusFilter === 'All' || item.reconciliationStatus === statusFilter) &&
+    (monthFilter === 'All' || item.servicePeriod === monthFilter),
+  );
+
+  return (
+    <section className="table-panel">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Reconciliation Queue</p>
+          <h2>Outstanding jobs and financial items.</h2>
+        </div>
+        <div className="accounting-preview-total">
+          <span>Visible items</span>
+          <strong>{filteredItems.length}</strong>
+        </div>
+      </div>
+
+      <div className="queue-filter-bar">
+        <label>
+          Type
+          <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
+            <option>All</option>
+            <option>Vendor Billing</option>
+            <option>Partnership Statements</option>
+            <option>Payment Matching</option>
+            <option>Prior-Period Adjustments</option>
+          </select>
+        </label>
+        <label>
+          Vendor
+          <select value={vendorFilter} onChange={(event) => setVendorFilter(event.target.value)}>
+            <option>All</option>
+            {vendors.map((vendor) => (
+              <option key={vendor.id}>{vendor.name}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Service period
+          <select value={monthFilter} onChange={(event) => setMonthFilter(event.target.value)}>
+            <option>All</option>
+            {monthChoices.map((choice) => (
+              <option key={choice}>{choice}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Status
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option>All</option>
+            <option>Open</option>
+            <option>Deferred</option>
+            <option>Exception</option>
+            <option>Reconciled</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="reconciliation-table" role="table" aria-label="reconciliation queue">
+        <div className="reconciliation-row header" role="row">
+          <span>Type</span>
+          <span>Item</span>
+          <span>Property</span>
+          <span>Vendor / Partner</span>
+          <span>Service Period</span>
+          <span>Billing Candidate</span>
+          <span>Status</span>
+          <span>Age</span>
+          <span>Suggested Action</span>
+        </div>
+        {filteredItems.length ? filteredItems.map((item) => (
+          <div className="reconciliation-row" key={item.id} role="row">
+            <span>{item.type}</span>
+            <strong>{item.item}</strong>
+            <span>{item.property}</span>
+            <span>{item.vendor || item.partner}</span>
+            <span>{item.servicePeriod}</span>
+            <span>{item.billingCandidate}</span>
+            <span><b className={`status ${statusTone(item.reconciliationStatus)}`}>{item.reconciliationStatus}</b><em>{item.jobStatus}</em></span>
+            <span>{item.ageLabel}</span>
+            <span>{item.suggestedAction}</span>
+          </div>
+        )) : (
+          <div className="empty-note table-empty">No reconciliation items match those filters.</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function MonthEndCloseWorkspace({
+  communities,
+  invoices,
+  items,
+  jobs,
+  vendors,
+}: {
+  communities: Community[];
+  invoices: InvoiceTrigger[];
+  items: ReconciliationItem[];
+  jobs: Job[];
+  vendors: Vendor[];
+}) {
+  const months = accountingMonthChoices(jobs, invoices).slice(0, 4);
+
+  return (
+    <section className="month-close-grid">
+      {months.map((monthKey) => {
+        const expectedVendorIds = new Set(
+          jobs
+            .filter((job) => job.vendorId && job.serviceDate.startsWith(monthKey))
+            .map((job) => job.vendorId),
+        );
+        const monthInvoices = invoices.filter((invoice) => invoiceStatementMonth(invoice, jobs) === monthKey);
+        const paidInvoices = monthInvoices.filter((invoice) => invoice.status === 'Paid');
+        const monthPrograms = partnershipPrograms.filter((program) => program.period === monthKey);
+        const monthQueueItems = items.filter((item) => item.servicePeriod === labelMonth(monthKey) || item.billingCandidate === labelMonth(monthKey));
+
+        return (
+          <article className="table-panel month-close-card" key={monthKey}>
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Month-End Close</p>
+                <h2>{labelMonth(monthKey)}</h2>
+              </div>
+              <span className="status review">{monthQueueItems.length ? 'Open items' : 'Ready'}</span>
+            </div>
+            <div className="month-close-section">
+              <h3>Vendor Billing</h3>
+              <div className="open-statement-facts">
+                <InfoTile label="Expected vendors" value={String(expectedVendorIds.size || vendors.length)} />
+                <InfoTile label="Invoices created" value={String(monthInvoices.length)} />
+                <InfoTile label="Paid" value={String(paidInvoices.length)} />
+              </div>
+            </div>
+            <div className="month-close-section">
+              <h3>Partnership Statements</h3>
+              <div className="open-statement-facts">
+                <InfoTile label="Expected statements" value={String(communities.length)} />
+                <InfoTile label="Program lines" value={String(monthPrograms.length)} />
+                <InfoTile label="Issued" value={String(communities.filter((community) => community.statementStatus === 'Issued').length)} />
+              </div>
+            </div>
+            <div className="month-close-section">
+              <h3>Reconciliation</h3>
+              <div className="open-statement-facts">
+                <InfoTile label="Unassigned jobs" value={String(monthQueueItems.filter((item) => item.type === 'Vendor Billing').length)} />
+                <InfoTile label="Payment exceptions" value={String(monthQueueItems.filter((item) => item.type === 'Payment Matching').length)} />
+                <InfoTile label="Prior periods" value={String(monthQueueItems.filter((item) => item.type === 'Prior-Period Adjustments').length)} />
+              </div>
+            </div>
+          </article>
+        );
+      })}
+    </section>
+  );
+}
+
+function AccountingSettingsWorkspace({
+  communities,
+  vendors,
+}: {
+  communities: Community[];
+  vendors: Vendor[];
+}) {
+  const preferredVendors = vendors.filter((vendor) => vendor.preferred);
+
+  return (
+    <section className="split-grid">
+      <div className="table-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Accounting Settings</p>
+            <h2>Vendor billing rules</h2>
+          </div>
+        </div>
+        <div className="rule-list">
+          {vendors.map((vendor) => (
+            <InfoTile
+              key={vendor.id}
+              label={vendor.name}
+              value={`${vendor.feePercent}% default / ${vendor.preferred ? 'Preferred vendor' : 'Standard vendor'}`}
+            />
+          ))}
+          <InfoTile label="Supported fee rules" value="Percentage, fixed amount, service-specific, tiered, custom commercial rule" />
+          <InfoTile label="Payment terms" value="Net 7 default with Stripe link when enabled" />
+        </div>
+      </div>
+
+      <div className="table-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Partnership Profiles</p>
+            <h2>Program defaults</h2>
+          </div>
+        </div>
+        <div className="rule-list">
+          {communities.map((community) => (
+            <InfoTile
+              key={community.id}
+              label={community.name}
+              value={`${community.manager} / ${community.plusMembers} PLUS members / GL defaults active`}
+            />
+          ))}
+          <InfoTile label="Preferred vendors" value={`${preferredVendors.length} profiles marked preferred`} />
+          <InfoTile label="Archive control" value="Admin-only, reason required for financial records" />
+        </div>
+      </div>
+    </section>
   );
 }
 
 function ReportsModule({
   communities,
-  highlightRecordId,
-  markStatementIssued,
+  jobs,
+  rewards,
+  vendors,
 }: {
   communities: Community[];
-  highlightRecordId?: string | null;
-  markStatementIssued: (communityId: string) => void;
+  jobs: Job[];
+  rewards: RewardEntry[];
+  vendors: Vendor[];
 }) {
+  const totalUsage = jobs.length;
+  const completedJobs = jobs.filter((job) => job.boardStatus === 'Completed').length;
+  const activeRewards = rewards.filter((reward) => reward.status === 'Available' || reward.status === 'Pending');
+  const serviceMix = Array.from(new Set(jobs.map((job) => job.service))).map((service) => ({
+    count: jobs.filter((job) => job.service === service).length,
+    revenue: jobs.filter((job) => job.service === service).reduce((sum, job) => sum + job.amount, 0),
+    service,
+  })).sort((a, b) => b.count - a.count);
+
   return (
     <>
       <MetricGrid
         metrics={[
-          {
-            label: 'Serviced communities',
-            value: String(communities.length),
-            detail: 'Active FLAIRO reporting locations',
-          },
-          {
-            label: 'Net income this month',
-            value: dollars(communities.reduce((sum, community) => sum + community.netIncome, 0)),
-            detail: 'Community statement basis',
-          },
-          {
-            label: 'Occupied homes',
-            value: communities.reduce((sum, community) => sum + community.occupied, 0).toLocaleString(),
-            detail: 'Statement denominator',
-          },
-          {
-            label: 'Avg. penetration',
-            value: percent(communities.reduce((sum, community) => sum + community.servicePenetration, 0) / communities.length),
-            detail: 'Homes enrolled or transacting',
-          },
+          { label: 'Serviced communities', value: String(communities.length), detail: 'Active reporting locations' },
+          { label: 'Service usage', value: String(totalUsage), detail: 'Resident benefit jobs tracked' },
+          { label: 'Completion rate', value: percent(totalUsage ? (completedJobs / totalUsage) * 100 : 0), detail: 'Operational performance' },
+          { label: 'Avg. penetration', value: percent(communities.reduce((sum, community) => sum + community.servicePenetration, 0) / communities.length), detail: 'Adoption by community' },
+          { label: 'Reward activity', value: String(activeRewards.length), detail: 'Active Plume Point entries' },
+          { label: 'Vendor pool', value: String(vendors.length), detail: 'Profiles in reporting scope' },
         ]}
       />
 
       <section className="table-panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Community financial reporting</p>
-            <h2>Monthly statement control</h2>
+            <p className="eyebrow">Reporting</p>
+            <h2>Dashboards, adoption, service usage, and revenue insights.</h2>
           </div>
-          <button type="button">Export statement set</button>
+          <button type="button">Export dashboard</button>
         </div>
-        <div className="statement-grid">
+        <div className="reporting-grid">
           {communities.map((community) => (
-            <article
-              className={`statement-card${highlightRecordId === `statement-${community.id}` ? ' record-highlight' : ''}`}
-              data-record-id={`statement-${community.id}`}
-              key={community.id}
-            >
+            <article className="statement-card" data-record-id={`report-${community.id}`} key={community.id}>
               <div>
-                <span className={community.statementStatus === 'Issued' ? 'status good' : 'status review'}>
-                  {community.statementStatus}
-                </span>
+                <span className="status good">Dashboard</span>
                 <h3>{community.name}</h3>
-                <p>{community.address} / {community.manager}</p>
+                <p>{community.address} / {community.market}</p>
               </div>
               <div className="statement-numbers">
                 <InfoTile label="Homes / occupied" value={`${community.homes} / ${community.occupied}`} />
                 <InfoTile label="Program penetration" value={percent(community.servicePenetration)} />
                 <InfoTile label="PLUS members" value={String(community.plusMembers)} />
-                <InfoTile label="Net ancillary income" value={dollars(community.netIncome)} />
+                <InfoTile label="Revenue insight" value={dollars(community.netIncome)} />
               </div>
-              <button type="button" onClick={() => markStatementIssued(community.id)}>
-                Mark statement issued
-              </button>
             </article>
           ))}
         </div>
       </section>
 
-      <section className="statement-strip">
-        <div>
-          <p className="eyebrow gold">Statement format source</p>
-          <h2>Ancillary income statement model</h2>
-          <p>
-            The reporting model follows the supplied FLAIRO workbook: property details, service period, gross revenue, vendor remittance, adjustments, net deposit, Plume Point liability, and community-facing tie-outs.
-          </p>
+      <section className="split-grid">
+        <div className="table-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Service Usage</p>
+              <h2>Program performance drill-down</h2>
+            </div>
+          </div>
+          <div className="compact-table service-report-table">
+            <div className="compact-row header">
+              <span>Service</span>
+              <span>Jobs</span>
+              <span>Revenue</span>
+              <span>Adoption Signal</span>
+              <span>Trend</span>
+            </div>
+            {serviceMix.map((row) => (
+              <div className="compact-row" key={row.service}>
+                <span>{row.service}</span>
+                <span>{row.count}</span>
+                <span>{dollars(row.revenue)}</span>
+                <span>{row.count > 1 ? 'Repeatable' : 'Emerging'}</span>
+                <span>{row.count > 1 ? 'Growing' : 'Watch'}</span>
+              </div>
+            ))}
+          </div>
         </div>
-        <div className="statement-checklist" aria-label="statement controls">
-          <span>Property tie-out</span>
-          <span>Service period</span>
-          <span>Vendor remittance</span>
-          <span>Plume Point liability</span>
-          <span>Net deposit</span>
+
+        <div className="table-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Revenue Insights</p>
+              <h2>Read-only finance lens</h2>
+            </div>
+          </div>
+          <div className="rule-list">
+            <InfoTile label="Program revenue" value={dollars(communities.reduce((sum, community) => sum + community.netIncome, 0))} />
+            <InfoTile label="Vendor service value" value={dollars(jobs.reduce((sum, job) => sum + job.amount, 0))} />
+            <InfoTile label="Potential FLAIRO fee" value={dollars(jobs.reduce((sum, job) => sum + job.flairoFee, 0))} />
+            <InfoTile label="Accounting handoff" value="Financial processing lives in Accounting" />
+          </div>
         </div>
       </section>
     </>
@@ -4065,12 +4931,12 @@ function VendorMonthCloseoutPanel({
     >
       <div className="section-heading vendor-month-head">
         <div>
-          <p className="eyebrow">{invoiceMode ? 'Month-end invoicing' : 'Current month vendor activity'}</p>
-          <h2>{invoiceMode ? `${labelMonth(monthKey)} vendor invoice statements` : `${labelMonth(monthKey)} vendor income closeout`}</h2>
+          <p className="eyebrow">{invoiceMode ? 'Vendor Billing' : 'Accounting snapshot'}</p>
+          <h2>{invoiceMode ? `${labelMonth(monthKey)} vendor invoice statements` : `${labelMonth(monthKey)} vendor billing candidates`}</h2>
         </div>
         {onOpenInvoices && (
           <button type="button" onClick={onOpenInvoices}>
-            Open month-end invoices
+            Open Accounting
           </button>
         )}
       </div>
@@ -4079,8 +4945,8 @@ function VendorMonthCloseoutPanel({
         <InfoTile label="Active vendors" value={String(rows.length)} />
         <InfoTile label="Resident service total" value={dollars(residentTotal)} />
         <InfoTile label={invoiceMode ? 'Statement total due' : 'Potential FLAIRO payout'} value={dollars(flairoPayout)} />
-        <InfoTile label="Ready to invoice" value={String(readyJobs)} />
-        <InfoTile label="Waiting on service" value={String(waitingJobs)} />
+        <InfoTile label="Recommended" value={String(readyJobs)} />
+        <InfoTile label="Requires review" value={String(waitingJobs)} />
       </div>
 
       <div className="vendor-month-table" role="table" aria-label="current month vendor closeout">
@@ -4095,9 +4961,9 @@ function VendorMonthCloseoutPanel({
         {rows.length ? rows.map((row) => {
           const canProcess = row.readyCount > 0;
           const buttonLabel = row.waitingCount && row.readyCount
-            ? 'Process ready'
+            ? 'Review recommended'
             : row.readyCount
-              ? 'Mark processed'
+              ? 'Review invoice'
               : 'Waiting';
 
           return (
@@ -4115,7 +4981,7 @@ function VendorMonthCloseoutPanel({
                 <span>{dollars(row.residentTotal)}</span>
                 <span>{dollars(row.flairoPayout)}</span>
                 <span className={`month-status ${row.waitingCount ? 'waiting' : 'ready'}`}>
-                  {row.waitingCount ? `${row.waitingCount} waiting` : 'Ready for closeout'}
+                  {row.waitingCount ? `${row.waitingCount} require review` : 'Recommended'}
                 </span>
                 {invoiceMode && (
                   <span>
@@ -4155,7 +5021,7 @@ function VendorMonthCloseoutPanel({
           );
         }) : (
           <div className="vendor-month-empty">
-            All current-month vendor invoices have been processed. The tally will begin again as new work is booked or completed.
+            No current-month vendor jobs are awaiting accounting review.
           </div>
         )}
       </div>
@@ -4286,6 +5152,24 @@ function StatusPill({ label, status }: { label: string; status: string }) {
 
 function moduleTitle(activeModule: ModuleId) {
   return navSections.find((section) => section.id === activeModule)?.label ?? 'Command';
+}
+
+function accountingTabFromHighlight(highlightRecordId?: string | null): AccountingTab {
+  if (highlightRecordId?.startsWith('statement-')) return 'partnership-statements';
+  if (highlightRecordId?.includes('reconciliation')) return 'reconciliation-queue';
+  return 'vendor-billing';
+}
+
+function vendorIdFromHighlight(highlightRecordId: string | null | undefined, vendors: Vendor[], fallback: string) {
+  const match = highlightRecordId?.match(/^vendor-month-(.+)$/);
+  if (match?.[1] && vendors.some((vendor) => vendor.id === match[1])) return match[1];
+  return fallback;
+}
+
+function communityIdFromHighlight(highlightRecordId: string | null | undefined, communities: Community[], fallback: string) {
+  const match = highlightRecordId?.match(/^statement-(.+)$/);
+  if (match?.[1] && communities.some((community) => community.id === match[1])) return match[1];
+  return fallback;
 }
 
 function addHours(isoDate: string, hours: number) {
@@ -4490,6 +5374,169 @@ function paymentDetail(job: Job) {
   return details.length ? details.join(' / ') : 'Amount, date, and receipt pending';
 }
 
+function jobRecommendedForReconciliation(job: Job) {
+  return job.boardStatus === 'Completed' && job.residentPaymentConfirmed;
+}
+
+function paymentVerificationSource(job: Job) {
+  const sources: string[] = [];
+  const receipt = job.receiptNumber?.toLowerCase() ?? '';
+  if (receipt.includes('stripe')) sources.push('Stripe Confirmed');
+  if (receipt.includes('admin')) sources.push('Admin Marked Paid');
+  if (job.residentPaymentConfirmed) sources.push('Resident Marked Paid');
+  if (job.vendorPaymentConfirmed) sources.push('Vendor Marked Paid');
+  return sources.length ? sources.join(' / ') : 'Not verified';
+}
+
+function jobVendorBillingStatus(job: Job, invoice?: InvoiceTrigger) {
+  if (invoice?.status === 'Paid' || job.invoiceStatus === 'Paid') return 'Paid';
+  if (invoice?.status === 'Sent' || job.invoiceStatus === 'Sent') return 'Invoiced';
+  if (invoice?.status === 'Draft queued' || invoice?.status === 'Ready' || job.invoiceStatus === 'Draft queued' || job.invoiceStatus === 'Ready') return 'Invoice Draft';
+  if (job.invoiceStatus === 'Deferred' || job.invoiceStatus === 'Hold') return 'Deferred';
+  if (job.invoiceStatus === 'Disputed') return 'Disputed';
+  if (job.invoiceStatus === 'Archived') return 'Archived';
+  return 'Not Invoiced';
+}
+
+function accountingMonthChoices(jobs: Job[], invoices: InvoiceTrigger[]) {
+  const months = new Set<string>([currentMonthKey()]);
+  jobs.forEach((job) => {
+    if (/^\d{4}-\d{2}/.test(job.serviceDate)) months.add(job.serviceDate.slice(0, 7));
+  });
+  invoices.forEach((invoice) => {
+    if (invoice.billingMonth && /^\d{4}-\d{2}$/.test(invoice.billingMonth)) months.add(invoice.billingMonth);
+    else if (/^\d{4}-\d{2}/.test(invoice.dueDate)) months.add(invoice.dueDate.slice(0, 7));
+  });
+  partnershipPrograms.forEach((program) => months.add(program.period));
+  return Array.from(months).sort((a, b) => b.localeCompare(a));
+}
+
+function buildVendorBillingCandidates(
+  jobs: Job[],
+  invoices: InvoiceTrigger[],
+  vendorId: string,
+  monthKey: string,
+) {
+  const activeInvoiceByJob = new Map(
+    invoices
+      .filter((invoice) => invoice.status !== 'Hold' && invoice.status !== 'Paid')
+      .map((invoice) => [invoice.jobId, invoice]),
+  );
+
+  return jobs
+    .filter((job) => {
+      if (job.vendorId !== vendorId || job.invoiceStatus === 'Archived') return false;
+      const serviceMonth = job.serviceDate.slice(0, 7);
+      const activeInvoice = activeInvoiceByJob.get(job.id);
+      const unresolved = job.invoiceStatus !== 'Sent' && job.invoiceStatus !== 'Paid';
+      return serviceMonth === monthKey || (serviceMonth < monthKey && unresolved) || activeInvoice?.billingMonth === monthKey;
+    })
+    .sort((a, b) => {
+      const readiness = Number(jobRecommendedForReconciliation(b)) - Number(jobRecommendedForReconciliation(a));
+      if (readiness) return readiness;
+      return b.serviceDate.localeCompare(a.serviceDate);
+    });
+}
+
+function buildReconciliationItems(
+  jobs: Job[],
+  invoices: InvoiceTrigger[],
+  communities: Community[],
+  vendors: Vendor[] = [],
+): ReconciliationItem[] {
+  const invoiceByJob = new Map(
+    invoices
+      .filter((invoice) => invoice.status !== 'Hold')
+      .map((invoice) => [invoice.jobId, invoice]),
+  );
+  const currentMonth = currentMonthKey();
+  const jobItems = jobs
+    .filter((job) => job.invoiceStatus !== 'Paid' && job.invoiceStatus !== 'Archived')
+    .map((job) => {
+      const invoice = invoiceByJob.get(job.id);
+      const serviceMonth = job.serviceDate.slice(0, 7);
+      const isPriorPeriod = /^\d{4}-\d{2}$/.test(serviceMonth) && serviceMonth < currentMonth;
+      const reconciliationStatus = jobReconciliationStatus(job);
+      const type = invoice?.status === 'Sent' || job.invoiceStatus === 'Sent'
+        ? 'Payment Matching'
+        : isPriorPeriod
+          ? 'Prior-Period Adjustments'
+          : 'Vendor Billing';
+      return {
+        ageLabel: ageFromDate(job.serviceDate),
+        amount: job.flairoFee,
+        billingCandidate: labelMonth(invoice?.billingMonth ?? currentMonth),
+        id: `job-reconciliation-${job.id}`,
+        item: `${job.id} / ${job.service}`,
+        jobStatus: job.boardStatus,
+        partner: communityName(job.communityId, communities),
+        paymentStatus: paymentSummary(job),
+        program: 'Preferred Vendor Referral',
+        property: communityName(job.communityId, communities),
+        reconciliationStatus,
+        servicePeriod: labelMonth(serviceMonth),
+        suggestedAction: reconciliationSuggestion(job, type),
+        type,
+        vendor: job.vendorId ? vendorName(job.vendorId, vendors) : 'Vendor not assigned',
+      };
+    });
+
+  const programItems = partnershipPrograms
+    .filter((program) => program.status !== 'Ready')
+    .map((program) => ({
+      ageLabel: 'Program review',
+      amount: program.income,
+      billingCandidate: labelMonth(program.period),
+      id: `program-reconciliation-${program.id}`,
+      item: `${program.name} / ${dollars(program.income)}`,
+      jobStatus: program.status,
+      partner: communityName(program.communityId, communities),
+      paymentStatus: 'Program income review',
+      program: program.name,
+      property: communityName(program.communityId, communities),
+      reconciliationStatus: 'Exception',
+      servicePeriod: labelMonth(program.period),
+      suggestedAction: 'Confirm GL code or defer',
+      type: 'Partnership Statements',
+      vendor: '',
+    }));
+
+  return [...jobItems, ...programItems].sort((a, b) => {
+    if (a.reconciliationStatus !== b.reconciliationStatus) return a.reconciliationStatus.localeCompare(b.reconciliationStatus);
+    return b.servicePeriod.localeCompare(a.servicePeriod);
+  });
+}
+
+function jobReconciliationStatus(job: Job) {
+  if (job.paymentInquiryStatus || job.invoiceStatus === 'Disputed' || job.boardStatus === 'Disputed') return 'Exception';
+  if (job.invoiceStatus === 'Hold' || job.invoiceStatus === 'Deferred') return 'Deferred';
+  if (job.invoiceStatus === 'Paid') return 'Reconciled';
+  return 'Open';
+}
+
+function reconciliationSuggestion(job: Job, type: string) {
+  if (!job.vendorId) return 'Return to job processing';
+  if (type === 'Payment Matching') return 'Track payment';
+  if (type === 'Prior-Period Adjustments') return 'Include on current invoice or defer';
+  if (!jobRecommendedForReconciliation(job)) return 'Review and acknowledge or defer';
+  return 'Include on invoice';
+}
+
+function statusTone(status: string) {
+  if (status === 'Reconciled') return 'good';
+  if (status === 'Exception') return 'hold';
+  return 'review';
+}
+
+function ageFromDate(value: string) {
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return 'Date pending';
+  const days = Math.max(0, Math.floor((Date.now() - timestamp) / (24 * HOUR_MS)));
+  if (days === 0) return 'Today';
+  if (days === 1) return '1 day';
+  return `${days} days`;
+}
+
 function getJobTimer(job: Job, clock: number) {
   const requestedAt = parseTimestamp(job.requestedAt, clock);
   const claimedAt = job.claimedAt ? parseTimestamp(job.claimedAt, clock) : null;
@@ -4561,9 +5608,9 @@ function buildVendorMonthRows(jobs: Job[], vendors: Vendor[], monthKey: string):
       const monthJobs = jobs.filter(
         (job) =>
           job.vendorId === vendor.id &&
-          job.boardStatus !== 'Open' &&
           job.invoiceStatus !== 'Sent' &&
           job.invoiceStatus !== 'Paid' &&
+          job.invoiceStatus !== 'Archived' &&
           jobInMonth(job, monthKey),
       );
       const services = Array.from(new Set(monthJobs.map((job) => job.service))).join(', ');
@@ -4571,12 +5618,12 @@ function buildVendorMonthRows(jobs: Job[], vendors: Vendor[], monthKey: string):
       return {
         flairoPayout: monthJobs.reduce((sum, job) => sum + job.flairoFee, 0),
         jobs: monthJobs,
-        readyCount: monthJobs.filter(jobInvoiceActionable).length,
+        readyCount: monthJobs.filter(jobRecommendedForReconciliation).length,
         residentTotal: monthJobs.reduce((sum, job) => sum + job.amount, 0),
         services,
         vendorId: vendor.id,
         vendorName: vendor.name,
-        waitingCount: monthJobs.filter((job) => !jobInvoiceActionable(job)).length,
+        waitingCount: monthJobs.filter((job) => !jobRecommendedForReconciliation(job)).length,
       };
     })
     .filter((row) => row.jobs.length > 0)
@@ -4637,6 +5684,7 @@ function buildOpenVendorStatements(
 }
 
 function invoiceStatementMonth(invoice: InvoiceTrigger, jobs: Job[]) {
+  if (invoice.billingMonth && /^\d{4}-\d{2}$/.test(invoice.billingMonth)) return invoice.billingMonth;
   const job = jobs.find((item) => item.id === invoice.jobId);
   const sourceDate = job?.serviceDate || invoice.dueDate;
   return /^\d{4}-\d{2}/.test(sourceDate) ? sourceDate.slice(0, 7) : currentMonthKey();
@@ -4658,13 +5706,6 @@ function labelInvoiceDue(dueDates: string[]) {
   return dueDates.find(Boolean) ?? 'Manual follow-up';
 }
 
-function jobInvoiceActionable(job: Job) {
-  return job.invoiceStatus !== 'Paid' && (
-    job.invoiceStatus === 'Ready' ||
-    job.invoiceStatus === 'Draft queued' ||
-    job.boardStatus === 'Completed'
-  );
-}
 
 function currentMonthKey(date = new Date()) {
   const month = String(date.getMonth() + 1).padStart(2, '0');

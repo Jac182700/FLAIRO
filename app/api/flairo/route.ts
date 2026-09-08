@@ -124,6 +124,7 @@ type InvoiceSeed = {
   jobId: string;
   vendorId: string;
   amount: number;
+  billingMonth?: string;
   status: string;
   dueDate: string;
   reference: string;
@@ -147,6 +148,11 @@ function addMonthsDate(inputDate: string, months: number) {
   if (Number.isNaN(base.getTime())) return inputDate;
   base.setUTCMonth(base.getUTCMonth() + months);
   return base.toISOString().slice(0, 10);
+}
+
+function currentMonthKey(date = new Date()) {
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  return `${date.getUTCFullYear()}-${month}`;
 }
 
 const services: ServiceSeed[] = [
@@ -571,6 +577,7 @@ const invoices: InvoiceSeed[] = [
     jobId: 'J-1050',
     vendorId: 'pink-palm',
     amount: 2.7,
+    billingMonth: '2026-09',
     status: 'Ready',
     dueDate: '2026-09-07',
     reference: 'Ready for monthly vendor statement',
@@ -580,6 +587,7 @@ const invoices: InvoiceSeed[] = [
     jobId: 'J-1038',
     vendorId: 'sparkle',
     amount: 118.4,
+    billingMonth: '2026-09',
     status: 'Draft queued',
     dueDate: '2026-09-05',
     reference: 'Added to vendor monthly statement',
@@ -800,6 +808,15 @@ export async function POST(request: Request) {
         await triggerInvoice(textPayload(payload, 'jobId'));
         stageMobileChange = true;
         break;
+      case 'finalize_vendor_invoice':
+        await finalizeVendorInvoice(
+          textPayload(payload, 'vendorId'),
+          textPayload(payload, 'monthKey'),
+          listPayload(payload, 'jobIdsJson', []),
+          booleanPayload(payload, 'reviewAcknowledged', false),
+        );
+        stageMobileChange = true;
+        break;
       case 'process_vendor_month':
         await processVendorMonth(textPayload(payload, 'vendorId'), textPayload(payload, 'monthKey'));
         stageMobileChange = true;
@@ -825,6 +842,15 @@ export async function POST(request: Request) {
           .bind('Issued', now(), textPayload(payload, 'communityId'))
           .run();
         await logEvent('Statement issued', textPayload(payload, 'communityId') ?? 'community', 'Community statement marked issued.');
+        stageMobileChange = true;
+        break;
+      case 'finalize_partnership_statement':
+        await finalizePartnershipStatement(
+          textPayload(payload, 'communityId'),
+          textPayload(payload, 'monthKey'),
+          listPayload(payload, 'programIdsJson', []),
+          booleanPayload(payload, 'reviewAcknowledged', false),
+        );
         stageMobileChange = true;
         break;
       case 'push_mobile_update':
@@ -855,7 +881,7 @@ async function initializeDatabase(db: D1Database) {
     db.prepare('CREATE TABLE IF NOT EXISTS job_orders (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, vendor_id TEXT, task_status TEXT NOT NULL, service_date TEXT, schedule_confirmed_at TEXT, vendor_confirmed_at TEXT, claimed_at TEXT, schedule_due_at TEXT, payment_consult_status TEXT NOT NULL DEFAULT "Not started", resident_paid_vendor INTEGER NOT NULL DEFAULT 0, vendor_payment_confirmed INTEGER NOT NULL DEFAULT 0, resident_payment_confirmed INTEGER NOT NULL DEFAULT 0, amount_paid_cents INTEGER, payment_date TEXT, receipt_number TEXT, payment_inquiry_status TEXT, service_amount_cents INTEGER NOT NULL, flairo_fee_cents INTEGER NOT NULL, points INTEGER NOT NULL DEFAULT 0, invoice_trigger_status TEXT NOT NULL DEFAULT "Waiting", created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS reward_ledger_entries (id TEXT PRIMARY KEY, resident_name TEXT NOT NULL, community_id TEXT NOT NULL, request_id TEXT, entry_type TEXT NOT NULL, status TEXT NOT NULL, points INTEGER NOT NULL, dollar_value_cents INTEGER NOT NULL DEFAULT 0, expires_at TEXT, plus_member INTEGER NOT NULL DEFAULT 1, alert_queued INTEGER NOT NULL DEFAULT 0, redeemed_in_expiration_window INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL, created_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS reward_program_settings (id TEXT PRIMARY KEY, point_value_cents INTEGER NOT NULL DEFAULT 1, redemption_cap_percent REAL NOT NULL DEFAULT 10, plus_membership_monthly_cents INTEGER NOT NULL DEFAULT 500, plus_only_accrual INTEGER NOT NULL DEFAULT 1, minimum_gold_balance INTEGER NOT NULL DEFAULT 500, expiration_months INTEGER NOT NULL DEFAULT 12, expiration_reminder_days INTEGER NOT NULL DEFAULT 7, adoption_index_previous_month INTEGER NOT NULL DEFAULT 69, registration_growth_percent REAL NOT NULL DEFAULT 12, activation_rate_percent REAL NOT NULL DEFAULT 46, first_service_conversion_percent REAL NOT NULL DEFAULT 28, active_30_day_rate_percent REAL NOT NULL DEFAULT 37, repeat_use_rate_percent REAL NOT NULL DEFAULT 31, survey_response_rate_percent REAL NOT NULL DEFAULT 38, avg_cx_rating REAL NOT NULL DEFAULT 4.6, updated_at TEXT NOT NULL)'),
-    db.prepare('CREATE TABLE IF NOT EXISTS invoice_triggers (id TEXT PRIMARY KEY, job_order_id TEXT NOT NULL, vendor_id TEXT NOT NULL, amount_cents INTEGER NOT NULL, status TEXT NOT NULL, bluevine_reference TEXT, due_date TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
+    db.prepare('CREATE TABLE IF NOT EXISTS invoice_triggers (id TEXT PRIMARY KEY, job_order_id TEXT NOT NULL, vendor_id TEXT NOT NULL, amount_cents INTEGER NOT NULL, billing_period TEXT, status TEXT NOT NULL, bluevine_reference TEXT, due_date TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS mobile_sync_state (id TEXT PRIMARY KEY, connection_status TEXT NOT NULL, last_checked_at TEXT NOT NULL, last_push_at TEXT, pending_changes INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0, last_push_summary TEXT NOT NULL DEFAULT "No mobile app push yet", updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, subject TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL)'),
   ]);
@@ -865,6 +891,7 @@ async function initializeDatabase(db: D1Database) {
     db.prepare('CREATE INDEX IF NOT EXISTS idx_vendors_access ON vendors (board_access, compliance_status)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_vendor_documents_vendor ON vendor_documents (vendor_id, document_type, created_at)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_rewards_status ON reward_ledger_entries (status)'),
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_invoice_triggers_billing ON invoice_triggers (vendor_id, billing_period, status)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_reward_program_settings_updated_at ON reward_program_settings (updated_at)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_mobile_sync_updated_at ON mobile_sync_state (updated_at)'),
   ]);
@@ -890,6 +917,7 @@ async function initializeDatabase(db: D1Database) {
   await ensureColumn(db, 'reward_ledger_entries', 'plus_member', 'INTEGER NOT NULL DEFAULT 1');
   await ensureColumn(db, 'reward_ledger_entries', 'alert_queued', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'reward_ledger_entries', 'redeemed_in_expiration_window', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(db, 'invoice_triggers', 'billing_period', 'TEXT');
   await db.prepare('UPDATE vendors SET preferred_vendor = 1 WHERE id IN (?, ?)')
     .bind('sparkle', 'porter')
     .run();
@@ -946,8 +974,8 @@ async function seedDatabase(db: D1Database) {
   );
   await db.batch(
     invoices.map((invoice) =>
-      db.prepare('INSERT INTO invoice_triggers (id, job_order_id, vendor_id, amount_cents, status, bluevine_reference, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(invoice.id, invoice.jobId, invoice.vendorId, cents(invoice.amount), invoice.status, invoice.reference, invoice.dueDate, stamp, stamp),
+      db.prepare('INSERT INTO invoice_triggers (id, job_order_id, vendor_id, amount_cents, billing_period, status, bluevine_reference, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(invoice.id, invoice.jobId, invoice.vendorId, cents(invoice.amount), invoice.billingMonth ?? invoice.dueDate.slice(0, 7), invoice.status, invoice.reference, invoice.dueDate, stamp, stamp),
     ),
   );
   await db.batch([
@@ -1034,6 +1062,7 @@ async function readState(db: D1Database) {
     })),
     invoices: invoiceRows.results.map((row) => ({
       amount: dollarsFromCents(Number(row.amount_cents)),
+      billingMonth: row.billing_period ? String(row.billing_period) : undefined,
       dueDate: String(row.due_date),
       id: String(row.id),
       jobId: String(row.job_order_id),
@@ -1573,94 +1602,102 @@ async function triggerInvoice(jobId?: string) {
   }
   const stamp = now();
   const invoiceId = `INV-Q-${Date.now().toString().slice(-5)}`;
+  const billingMonth = currentMonthKey();
   await env.DB.batch([
-    env.DB.prepare('INSERT INTO invoice_triggers (id, job_order_id, vendor_id, amount_cents, status, bluevine_reference, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .bind(invoiceId, job.id, job.vendorId, cents(job.flairoFee), 'Draft queued', 'Added to vendor monthly statement', 'Net 7', stamp, stamp),
+    env.DB.prepare('INSERT INTO invoice_triggers (id, job_order_id, vendor_id, amount_cents, billing_period, status, bluevine_reference, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(invoiceId, job.id, job.vendorId, cents(job.flairoFee), billingMonth, 'Draft queued', 'Added to vendor monthly statement', 'Net 7', stamp, stamp),
     env.DB.prepare('UPDATE job_orders SET invoice_trigger_status = ?, updated_at = ? WHERE id = ?')
       .bind('Draft queued', stamp, job.id),
   ]);
   await logEvent('Invoice statement item', invoiceId, `${job.id} added to the vendor monthly statement.`);
 }
 
-async function processVendorMonth(vendorId?: string, monthKey?: string) {
-  if (!vendorId || !monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) return;
-  const [year, month] = monthKey.split('-').map(Number);
-  if (!year || !month || month < 1 || month > 12) return;
-
-  const nextMonth = month === 12 ? 1 : month + 1;
-  const nextYear = month === 12 ? year + 1 : year;
-  const startDate = `${monthKey}-01`;
-  const endDate = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
+async function finalizeVendorInvoice(
+  vendorId?: string,
+  monthKey?: string,
+  jobIds: string[] = [],
+  reviewAcknowledged = false,
+) {
+  if (!vendorId || !monthKey || !/^\d{4}-\d{2}$/.test(monthKey) || !jobIds.length) return;
   const stamp = now();
-  const readyRows = await env.DB.prepare(`
-    SELECT id, flairo_fee_cents
-    FROM job_orders
-    WHERE vendor_id = ?
-      AND service_date >= ?
-      AND service_date < ?
-      AND invoice_trigger_status NOT IN (?, ?)
-      AND (invoice_trigger_status IN (?, ?) OR task_status = ?)
-  `)
-    .bind(vendorId, startDate, endDate, 'Sent', 'Paid', 'Ready', 'Draft queued', 'Completed')
-    .all<Record<string, unknown>>();
-  const missingInvoiceInserts: D1PreparedStatement[] = [];
+  const uniqueJobIds = Array.from(new Set(jobIds.map((jobId) => jobId.trim()).filter(Boolean)));
+  if (!uniqueJobIds.length) return;
 
-  for (const row of readyRows.results) {
-    const jobId = String(row.id);
-    const existing = await env.DB.prepare('SELECT id FROM invoice_triggers WHERE job_order_id = ? AND vendor_id = ? LIMIT 1')
+  const inserts: D1PreparedStatement[] = [];
+  const updates: D1PreparedStatement[] = [];
+  const invoiceUpdates: D1PreparedStatement[] = [];
+  let selectedCount = 0;
+  let reviewCount = 0;
+
+  for (const jobId of uniqueJobIds) {
+    const job = await env.DB.prepare('SELECT id, task_status, resident_payment_confirmed, flairo_fee_cents FROM job_orders WHERE id = ? AND vendor_id = ? LIMIT 1')
       .bind(jobId, vendorId)
+      .first<{ id: string; task_status: string; resident_payment_confirmed: number; flairo_fee_cents: number }>();
+    if (!job) continue;
+
+    selectedCount += 1;
+    if (job.task_status !== 'Completed' || !job.resident_payment_confirmed) reviewCount += 1;
+
+    const existing = await env.DB.prepare('SELECT id FROM invoice_triggers WHERE job_order_id = ? AND vendor_id = ? AND status NOT IN (?, ?) LIMIT 1')
+      .bind(jobId, vendorId, 'Hold', 'Paid')
       .first<{ id: string }>();
 
-    if (!existing) {
-      missingInvoiceInserts.push(
-        env.DB.prepare('INSERT INTO invoice_triggers (id, job_order_id, vendor_id, amount_cents, status, bluevine_reference, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-          .bind(`INV-M-${monthKey.replace('-', '')}-${jobId}`, jobId, vendorId, Number(row.flairo_fee_cents), 'Sent', 'Included on vendor monthly statement', 'Net 7', stamp, stamp),
+    if (existing?.id) {
+      invoiceUpdates.push(
+        env.DB.prepare('UPDATE invoice_triggers SET billing_period = ?, status = ?, bluevine_reference = ?, updated_at = ? WHERE id = ?')
+          .bind(
+            monthKey,
+            'Sent',
+            reviewAcknowledged ? 'Included on vendor invoice with admin review acknowledgement' : 'Included on vendor invoice',
+            stamp,
+            existing.id,
+          ),
+      );
+    } else {
+      inserts.push(
+        env.DB.prepare('INSERT INTO invoice_triggers (id, job_order_id, vendor_id, amount_cents, billing_period, status, bluevine_reference, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .bind(
+            `INV-M-${monthKey.replace('-', '')}-${jobId}`,
+            jobId,
+            vendorId,
+            Number(job.flairo_fee_cents),
+            monthKey,
+            'Sent',
+            reviewAcknowledged ? 'Included on vendor invoice with admin review acknowledgement' : 'Included on vendor invoice',
+            'Net 7',
+            stamp,
+            stamp,
+          ),
       );
     }
+
+    updates.push(
+      env.DB.prepare('UPDATE job_orders SET invoice_trigger_status = ?, updated_at = ? WHERE id = ? AND vendor_id = ?')
+        .bind('Sent', stamp, jobId, vendorId),
+    );
   }
 
-  if (missingInvoiceInserts.length) {
-    await env.DB.batch(missingInvoiceInserts);
-  }
+  const statements = [...inserts, ...invoiceUpdates, ...updates];
+  if (statements.length) await env.DB.batch(statements);
 
-  await env.DB.batch([
-    env.DB.prepare(`
-      UPDATE job_orders
-      SET invoice_trigger_status = ?, updated_at = ?
-      WHERE vendor_id = ?
-        AND service_date >= ?
-        AND service_date < ?
-        AND invoice_trigger_status NOT IN (?, ?)
-        AND (invoice_trigger_status IN (?, ?) OR task_status = ?)
-    `)
-      .bind('Sent', stamp, vendorId, startDate, endDate, 'Sent', 'Paid', 'Ready', 'Draft queued', 'Completed'),
-    env.DB.prepare(`
-      UPDATE invoice_triggers
-      SET status = ?, bluevine_reference = ?, updated_at = ?
-      WHERE vendor_id = ?
-        AND status NOT IN (?, ?)
-        AND job_order_id IN (
-          SELECT id
-          FROM job_orders
-          WHERE vendor_id = ?
-            AND service_date >= ?
-            AND service_date < ?
-        )
-    `)
-      .bind('Sent', 'Included on vendor monthly statement', stamp, vendorId, 'Paid', 'Hold', vendorId, startDate, endDate),
-  ]);
-  await logEvent('Vendor month processed', vendorId, `Monthly vendor statement processed for ${monthKey}; job-level tally reset.`);
+  await logEvent(
+    'Vendor invoice finalized',
+    vendorId,
+    `${selectedCount} selected job${selectedCount === 1 ? '' : 's'} attached to ${monthKey} vendor invoice; ${reviewCount} required review acknowledgement and unselected jobs remain in reconciliation.`,
+  );
+}
+
+async function processVendorMonth(vendorId?: string, monthKey?: string) {
+  if (!vendorId || !monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) return;
+  await logEvent(
+    'Vendor invoice selection required',
+    vendorId,
+    `Bulk month processing for ${monthKey} was skipped; Accounting must finalize explicitly selected job records.`,
+  );
 }
 
 async function markVendorStatementPaid(vendorId?: string, monthKey?: string) {
   if (!vendorId || !monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) return;
-  const [year, month] = monthKey.split('-').map(Number);
-  if (!year || !month || month < 1 || month > 12) return;
-
-  const nextMonth = month === 12 ? 1 : month + 1;
-  const nextYear = month === 12 ? year + 1 : year;
-  const startDate = `${monthKey}-01`;
-  const endDate = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
   const stamp = now();
 
   await env.DB.batch([
@@ -1669,29 +1706,41 @@ async function markVendorStatementPaid(vendorId?: string, monthKey?: string) {
       SET status = ?, bluevine_reference = ?, updated_at = ?
       WHERE vendor_id = ?
         AND status NOT IN (?, ?)
-        AND (
-          job_order_id IN (
-            SELECT id
-            FROM job_orders
-            WHERE vendor_id = ?
-              AND service_date >= ?
-              AND service_date < ?
-          )
-          OR (due_date >= ? AND due_date < ?)
-        )
+        AND COALESCE(billing_period, substr(due_date, 1, 7)) = ?
     `)
-      .bind('Paid', 'Manual vendor statement payment recorded', stamp, vendorId, 'Paid', 'Hold', vendorId, startDate, endDate, startDate, endDate),
+      .bind('Paid', 'Manual vendor statement payment recorded', stamp, vendorId, 'Paid', 'Hold', monthKey),
     env.DB.prepare(`
       UPDATE job_orders
       SET invoice_trigger_status = ?, updated_at = ?
-      WHERE vendor_id = ?
-        AND service_date >= ?
-        AND service_date < ?
-        AND invoice_trigger_status IN (?, ?, ?)
+      WHERE id IN (
+        SELECT job_order_id
+        FROM invoice_triggers
+        WHERE vendor_id = ?
+          AND status = ?
+          AND COALESCE(billing_period, substr(due_date, 1, 7)) = ?
+      )
     `)
-      .bind('Paid', stamp, vendorId, startDate, endDate, 'Ready', 'Draft queued', 'Sent'),
+      .bind('Paid', stamp, vendorId, 'Paid', monthKey),
   ]);
   await logEvent('Vendor statement paid', vendorId, `Manual payment recorded for ${monthKey} vendor statement.`);
+}
+
+async function finalizePartnershipStatement(
+  communityId?: string,
+  monthKey?: string,
+  programIds: string[] = [],
+  reviewAcknowledged = false,
+) {
+  if (!communityId || !monthKey || !/^\d{4}-\d{2}$/.test(monthKey) || !programIds.length) return;
+  const stamp = now();
+  await env.DB.prepare('UPDATE communities SET statement_status = ?, updated_at = ? WHERE id = ?')
+    .bind('Issued', stamp, communityId)
+    .run();
+  await logEvent(
+    'Partnership statement issued',
+    communityId,
+    `${programIds.length} selected program${programIds.length === 1 ? '' : 's'} issued for ${monthKey}; review acknowledgement ${reviewAcknowledged ? 'recorded' : 'not required'} and excluded items remain in reconciliation.`,
+  );
 }
 
 async function updateRewardSettings(payload: Record<string, string | number | boolean | null>) {

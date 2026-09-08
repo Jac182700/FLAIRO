@@ -207,6 +207,7 @@ export const invoiceTriggers = sqliteTable(
     jobOrderId: text('job_order_id').notNull().references(() => jobOrders.id),
     vendorId: text('vendor_id').notNull().references(() => vendors.id),
     amountCents: integer('amount_cents').notNull(),
+    billingPeriod: text('billing_period'),
     status: text('status').notNull(),
     bluevineReference: text('bluevine_reference'),
     dueDate: text('due_date').notNull(),
@@ -216,6 +217,7 @@ export const invoiceTriggers = sqliteTable(
   (table) => [
     index('idx_invoice_triggers_status').on(table.status),
     index('idx_invoice_triggers_vendor_id').on(table.vendorId),
+    index('idx_invoice_triggers_billing').on(table.vendorId, table.billingPeriod, table.status),
   ],
 );
 
