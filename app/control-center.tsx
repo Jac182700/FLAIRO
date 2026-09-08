@@ -201,6 +201,30 @@ type PartnershipProgram = {
   pointsRedeemed: number;
 };
 
+type PartnershipStatementExportRow = {
+  activity: string;
+  glCode: string;
+  income: number;
+  period: string;
+  program: string;
+  status: string;
+};
+
+type PartnershipStatementExport = {
+  communityName: string;
+  manager: string;
+  monthKey: string;
+  monthLabel: string;
+  participation: number;
+  plusMembers: number;
+  pointsEarned: number;
+  pointsRedeemed: number;
+  programsSelected: number;
+  reviewLines: number;
+  rows: PartnershipStatementExportRow[];
+  totalPayout: number;
+};
+
 type ReconciliationItem = {
   id: string;
   type: string;
@@ -4608,6 +4632,7 @@ function PartnershipStatementsWorkflow({
   const [monthKey, setMonthKey] = useState(currentMonthKey());
   const [programSelection, setProgramSelection] = useState<{ ids: string[]; key: string }>({ ids: [], key: '' });
   const [glOverrides, setGlOverrides] = useState<Record<string, string>>({});
+  const [statementReportOpen, setStatementReportOpen] = useState(false);
   const selectionKey = `${communityId}-${monthKey}`;
   const selectedProgramIds = programSelection.key === selectionKey ? programSelection.ids : [];
   const monthChoices = accountingMonthChoices([], []).concat(
@@ -4622,6 +4647,27 @@ function PartnershipStatementsWorkflow({
   const reviewPrograms = selectedPrograms.filter((program) => program.status !== 'Ready');
   const selectedIncome = selectedPrograms.reduce((sum, program) => sum + program.income, 0);
   const community = communities.find((item) => item.id === communityId);
+  const statementReport: PartnershipStatementExport = {
+    communityName: community?.name ?? 'Community',
+    manager: community?.manager ?? 'Ownership partner',
+    monthKey,
+    monthLabel: labelMonth(monthKey),
+    participation: community?.servicePenetration ?? 0,
+    plusMembers: community?.plusMembers ?? 0,
+    pointsEarned: selectedPrograms.reduce((sum, program) => sum + program.pointsEarned, 0),
+    pointsRedeemed: selectedPrograms.reduce((sum, program) => sum + program.pointsRedeemed, 0),
+    programsSelected: selectedPrograms.length,
+    reviewLines: reviewPrograms.length,
+    rows: selectedPrograms.map((program) => ({
+      activity: `${program.jobsBooked} activities / ${program.popularService}`,
+      glCode: glOverrides[program.id] ?? program.glCode,
+      income: program.income,
+      period: labelMonth(program.period),
+      program: program.name,
+      status: program.status,
+    })),
+    totalPayout: selectedIncome,
+  };
 
   const toggleProgramSelection = (programId: string, checked: boolean) => {
     setProgramSelection((current) => {
@@ -4635,12 +4681,15 @@ function PartnershipStatementsWorkflow({
   const replaceProgramSelection = (ids: string[]) => setProgramSelection({ ids, key: selectionKey });
 
   const finalizeStatement = () => {
+    if (!selectedProgramIds.length) return false;
     if (reviewPrograms.length) {
       const confirmed = window.confirm('Some selected programs require review. Issue the partnership statement with admin acknowledgement?');
-      if (!confirmed) return;
+      if (!confirmed) return false;
     }
     finalizePartnershipStatement(communityId, monthKey, selectedProgramIds, reviewPrograms.length > 0);
     replaceProgramSelection([]);
+    setStatementReportOpen(false);
+    return true;
   };
 
   return (
@@ -4733,14 +4782,14 @@ function PartnershipStatementsWorkflow({
         </div>
       </div>
 
-      <section className="split-grid">
+      <section className="statement-preview-grid">
         <div className="table-panel">
           <div className="section-heading">
             <div>
               <p className="eyebrow">Statement Preview</p>
               <h2>{community?.name ?? 'Community'} / {labelMonth(monthKey)}</h2>
             </div>
-            <button disabled={!selectedProgramIds.length} type="button" onClick={finalizeStatement}>
+            <button type="button" onClick={() => setStatementReportOpen(true)}>
               Issue Partnership Statement
             </button>
           </div>
@@ -4758,24 +4807,289 @@ function PartnershipStatementsWorkflow({
             <strong>{selectedPrograms.reduce((sum, program) => sum + program.pointsEarned, 0).toLocaleString()} / {selectedPrograms.reduce((sum, program) => sum + program.pointsRedeemed, 0).toLocaleString()}</strong>
           </div>
         </div>
-
-        <div className="table-panel">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Partnership Profile</p>
-              <h2>{community?.manager ?? 'Ownership partner'}</h2>
-            </div>
-          </div>
-          <div className="rule-list">
-            <InfoTile label="Statement recipient" value="Accounting POC on partnership profile" />
-            <InfoTile label="Payment instructions" value="Profile default" />
-            <InfoTile label="Default GL handling" value="Program configuration with override audit" />
-            <InfoTile label="Financial documents" value="Statement history and payment history retained" />
-          </div>
-        </div>
       </section>
+
+      {statementReportOpen && (
+        <PartnershipStatementExportModal
+          onClose={() => setStatementReportOpen(false)}
+          onIssue={finalizeStatement}
+          report={statementReport}
+        />
+      )}
     </section>
   );
+}
+
+function PartnershipStatementExportModal({
+  onClose,
+  onIssue,
+  report,
+}: {
+  onClose: () => void;
+  onIssue: () => boolean;
+  report: PartnershipStatementExport;
+}) {
+  const canIssue = report.rows.length > 0;
+
+  return (
+    <div className="modal-backdrop">
+      <section
+        aria-labelledby="partnership-export-title"
+        aria-modal="true"
+        className="vendor-modal statement-export-modal"
+        role="dialog"
+      >
+        <div className="modal-head">
+          <div>
+            <p className="eyebrow">Partnership Statement Report</p>
+            <h2 id="partnership-export-title">{report.communityName} / {report.monthLabel}</h2>
+          </div>
+          <button className="secondary-action" onClick={onClose} type="button">
+            Close
+          </button>
+        </div>
+
+        <div className="statement-export-summary">
+          <InfoTile label="Programs selected" value={String(report.programsSelected)} />
+          <InfoTile label="Total payout" value={dollars(report.totalPayout)} />
+          <InfoTile label="Review lines" value={String(report.reviewLines)} />
+          <InfoTile label="Account owner" value={report.manager} />
+        </div>
+
+        <div className="statement-export-table" role="table" aria-label="partnership statement export report">
+          <div className="statement-export-row header" role="row">
+            <span>Program</span>
+            <span>Period</span>
+            <span>GL Code</span>
+            <span>Income</span>
+            <span>Status</span>
+            <span>Activity</span>
+          </div>
+          {report.rows.length ? report.rows.map((row) => (
+            <div className="statement-export-row" key={`${row.program}-${row.glCode}`} role="row">
+              <strong>{row.program}</strong>
+              <span>{row.period}</span>
+              <span>{row.glCode}</span>
+              <span>{dollars(row.income)}</span>
+              <span><b className={`status ${row.status === 'Ready' ? 'good' : 'review'}`}>{row.status}</b></span>
+              <span>{row.activity}</span>
+            </div>
+          )) : (
+            <div className="empty-note table-empty">No selected program income lines for this statement.</div>
+          )}
+        </div>
+
+        <div className="accounting-note-grid">
+          <span>RBP participation</span>
+          <strong>{percent(report.participation)}</strong>
+          <span>FLAIRO PLUS memberships</span>
+          <strong>{String(report.plusMembers)}</strong>
+          <span>Points earned / redeemed</span>
+          <strong>{report.pointsEarned.toLocaleString()} / {report.pointsRedeemed.toLocaleString()}</strong>
+        </div>
+
+        <div className="modal-actions">
+          <button className="secondary-action" onClick={() => downloadPartnershipStatementExcel(report)} type="button">
+            Export Excel
+          </button>
+          <button className="secondary-action" onClick={() => downloadPartnershipStatementPdf(report)} type="button">
+            Export PDF
+          </button>
+          <button disabled={!canIssue} onClick={onIssue} type="button">
+            Issue and save statement
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function downloadPartnershipStatementExcel(report: PartnershipStatementExport) {
+  const rows = report.rows.length
+    ? report.rows.map((row) => `
+      <tr>
+        <td>${escapeHtml(row.program)}</td>
+        <td>${escapeHtml(row.period)}</td>
+        <td>${escapeHtml(row.glCode)}</td>
+        <td>${row.income.toFixed(2)}</td>
+        <td>${escapeHtml(row.status)}</td>
+        <td>${escapeHtml(row.activity)}</td>
+      </tr>
+    `).join('')
+    : '<tr><td colspan="6">No selected program income lines for this statement.</td></tr>';
+  const workbook = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { font-family: Arial, sans-serif; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #999; padding: 8px; text-align: left; }
+      th { background: #f3e7a9; }
+      .summary td:first-child { font-weight: bold; width: 220px; }
+    </style>
+  </head>
+  <body>
+    <h1>FLAIRO Partnership Statement</h1>
+    <h2>${escapeHtml(report.communityName)} / ${escapeHtml(report.monthLabel)}</h2>
+    <table class="summary">
+      <tr><td>Account owner</td><td>${escapeHtml(report.manager)}</td></tr>
+      <tr><td>Programs selected</td><td>${report.programsSelected}</td></tr>
+      <tr><td>Total payout</td><td>${report.totalPayout.toFixed(2)}</td></tr>
+      <tr><td>Review lines</td><td>${report.reviewLines}</td></tr>
+      <tr><td>RBP participation</td><td>${report.participation}%</td></tr>
+      <tr><td>FLAIRO PLUS memberships</td><td>${report.plusMembers}</td></tr>
+      <tr><td>Points earned / redeemed</td><td>${report.pointsEarned} / ${report.pointsRedeemed}</td></tr>
+    </table>
+    <br />
+    <table>
+      <thead>
+        <tr>
+          <th>Program</th>
+          <th>Period</th>
+          <th>GL Code</th>
+          <th>Income</th>
+          <th>Status</th>
+          <th>Activity</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </body>
+</html>`;
+
+  downloadBlob(`${statementReportFileStem(report)}.xls`, new Blob([workbook], { type: 'application/vnd.ms-excel;charset=utf-8' }));
+}
+
+function downloadPartnershipStatementPdf(report: PartnershipStatementExport) {
+  downloadBlob(`${statementReportFileStem(report)}.pdf`, new Blob([createPartnershipStatementPdf(report)], { type: 'application/pdf' }));
+}
+
+function downloadBlob(filename: string, blob: Blob) {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+}
+
+function statementReportFileStem(report: PartnershipStatementExport) {
+  return `${report.communityName}-${report.monthKey}-partnership-statement`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'flairo-partnership-statement';
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function createPartnershipStatementPdf(report: PartnershipStatementExport) {
+  let y = 746;
+  const streamParts: string[] = [
+    pdfText(44, y, 18, 'FLAIRO Partnership Statement', 'F2'),
+  ];
+  y -= 28;
+  streamParts.push(pdfText(44, y, 13, `${report.communityName} / ${report.monthLabel}`, 'F2'));
+  y -= 18;
+  streamParts.push(pdfText(44, y, 10, `Account owner: ${report.manager}`));
+  y -= 28;
+
+  [
+    `Programs selected: ${report.programsSelected}`,
+    `Total payout: ${dollars(report.totalPayout)}`,
+    `Review lines: ${report.reviewLines}`,
+    `RBP participation: ${percent(report.participation)}`,
+    `FLAIRO PLUS memberships: ${report.plusMembers}`,
+    `Points earned / redeemed: ${report.pointsEarned.toLocaleString()} / ${report.pointsRedeemed.toLocaleString()}`,
+  ].forEach((line) => {
+    streamParts.push(pdfText(44, y, 10, line));
+    y -= 14;
+  });
+
+  y -= 12;
+  streamParts.push(pdfLine(44, y, 568, y));
+  y -= 18;
+  streamParts.push(pdfText(44, y, 9, 'Program', 'F2'));
+  streamParts.push(pdfText(190, y, 9, 'Period', 'F2'));
+  streamParts.push(pdfText(270, y, 9, 'GL Code', 'F2'));
+  streamParts.push(pdfText(346, y, 9, 'Income', 'F2'));
+  streamParts.push(pdfText(420, y, 9, 'Status', 'F2'));
+  streamParts.push(pdfText(486, y, 9, 'Activity', 'F2'));
+  y -= 14;
+  streamParts.push(pdfLine(44, y, 568, y));
+  y -= 18;
+
+  if (!report.rows.length) {
+    streamParts.push(pdfText(44, y, 10, 'No selected program income lines for this statement.'));
+  }
+
+  report.rows.slice(0, 24).forEach((row) => {
+    streamParts.push(pdfText(44, y, 8, truncatePdfText(row.program, 28)));
+    streamParts.push(pdfText(190, y, 8, truncatePdfText(row.period, 12)));
+    streamParts.push(pdfText(270, y, 8, truncatePdfText(row.glCode, 12)));
+    streamParts.push(pdfText(346, y, 8, dollars(row.income)));
+    streamParts.push(pdfText(420, y, 8, truncatePdfText(row.status, 12)));
+    streamParts.push(pdfText(486, y, 8, truncatePdfText(row.activity, 24)));
+    y -= 18;
+  });
+
+  if (report.rows.length > 24) {
+    streamParts.push(pdfText(44, y, 9, `Additional rows available in Excel export: ${report.rows.length - 24}`));
+  }
+
+  const stream = streamParts.join('');
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',
+    `<< /Length ${stream.length + 1} >>\nstream\n${stream}\nendstream`,
+  ];
+  let output = '%PDF-1.4\n';
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(output.length);
+    output += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = output.length;
+  output += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  output += offsets.slice(1).map((offset) => `${String(offset).padStart(10, '0')} 00000 n `).join('\n');
+  output += `\ntrailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return output;
+}
+
+function pdfText(x: number, y: number, size: number, text: string, font = 'F1') {
+  return `BT /${font} ${size} Tf ${x} ${y} Td (${pdfEscape(text)}) Tj ET\n`;
+}
+
+function pdfLine(x1: number, y1: number, x2: number, y2: number) {
+  return `${x1} ${y1} m ${x2} ${y2} l S\n`;
+}
+
+function pdfEscape(value: string) {
+  return pdfSafeText(value)
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)');
+}
+
+function pdfSafeText(value: string) {
+  return value.replace(/[^\x20-\x7E]/g, '-');
+}
+
+function truncatePdfText(value: string, length: number) {
+  const safe = pdfSafeText(value);
+  return safe.length > length ? `${safe.slice(0, Math.max(0, length - 3))}...` : safe;
 }
 
 function ReconciliationQueueWorkspace({
