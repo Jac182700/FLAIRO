@@ -200,6 +200,24 @@ export const rewardProgramSettings = sqliteTable(
   (table) => [index('idx_reward_program_settings_updated_at').on(table.updatedAt)],
 );
 
+export const crmAccountSettings = sqliteTable(
+  'crm_account_settings',
+  {
+    id: text('id').primaryKey(),
+    billingContact: text('billing_contact').notNull().default(''),
+    accountingEmail: text('accounting_email').notNull().default(''),
+    defaultPaymentTerms: text('default_payment_terms').notNull().default('Net 7'),
+    statementApprover: text('statement_approver').notNull().default(''),
+    documentRequirements: text('document_requirements').notNull().default(''),
+    vendorOnboardingOwner: text('vendor_onboarding_owner').notNull().default(''),
+    mobileCatalogOwner: text('mobile_catalog_owner').notNull().default(''),
+    supportRouting: text('support_routing').notNull().default(''),
+    accountMode: text('account_mode').notNull().default('Live operations'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [index('idx_crm_account_settings_updated_at').on(table.updatedAt)],
+);
+
 export const invoiceTriggers = sqliteTable(
   'invoice_triggers',
   {

@@ -162,6 +162,18 @@ type RewardSettings = {
   avgCxRating: number;
 };
 
+type CrmAccountSettings = {
+  accountMode: string;
+  accountingEmail: string;
+  billingContact: string;
+  defaultPaymentTerms: string;
+  documentRequirements: string;
+  mobileCatalogOwner: string;
+  statementApprover: string;
+  supportRouting: string;
+  vendorOnboardingOwner: string;
+};
+
 type InvoiceTrigger = {
   id: string;
   jobId: string;
@@ -290,6 +302,18 @@ type RewardAdjustmentDraft = {
   note: string;
 };
 
+type PartnershipProfileDraft = {
+  address: string;
+  homes: string;
+  manager: string;
+  market: string;
+  name: string;
+  netIncome: string;
+  occupied: string;
+  plusMembers: string;
+  servicePenetration: string;
+};
+
 type VendorMonthRow = {
   vendorId: string;
   vendorName: string;
@@ -315,6 +339,7 @@ type OpenVendorStatement = {
 type FlairoState = {
   audit: AuditEntry[];
   communities: Community[];
+  crmAccountSettings: CrmAccountSettings;
   invoices: InvoiceTrigger[];
   jobs: Job[];
   mobileSync: MobileSync;
@@ -782,6 +807,18 @@ const initialRewardSettings: RewardSettings = {
   surveyResponseRatePercent: 38,
 };
 
+const initialCrmAccountSettings: CrmAccountSettings = {
+  accountMode: 'Live operations',
+  accountingEmail: 'accounting@flairo.org',
+  billingContact: 'FLAIRO Admin',
+  defaultPaymentTerms: 'Net 7',
+  documentRequirements: 'Insurance, business license, W-9, contract',
+  mobileCatalogOwner: 'Resident Experience',
+  statementApprover: 'Partnership Accounting',
+  supportRouting: 'info@flairo.org',
+  vendorOnboardingOwner: 'Vendor Operations',
+};
+
 const initialInvoices: InvoiceTrigger[] = [
   {
     id: 'INV-Q-2208',
@@ -1006,6 +1043,7 @@ export default function ControlCenter({
   const [jobs, setJobs] = useState<Job[]>(initialJobs);
   const [rewards, setRewards] = useState<RewardEntry[]>(initialRewards);
   const [rewardSettings, setRewardSettings] = useState<RewardSettings>(initialRewardSettings);
+  const [crmAccountSettings, setCrmAccountSettings] = useState<CrmAccountSettings>(initialCrmAccountSettings);
   const [invoices, setInvoices] = useState<InvoiceTrigger[]>(initialInvoices);
   const [communities, setCommunities] = useState<Community[]>(initialCommunities);
   const [audit, setAudit] = useState<AuditEntry[]>(initialAudit);
@@ -1030,6 +1068,7 @@ export default function ControlCenter({
   const applyServerState = (state: Partial<FlairoState>) => {
     if (state.audit) setAudit(state.audit);
     if (state.communities) setCommunities(state.communities);
+    if (state.crmAccountSettings) setCrmAccountSettings(state.crmAccountSettings);
     if (state.invoices) setInvoices(state.invoices);
     if (state.jobs) setJobs(state.jobs);
     if (state.mobileSync) setMobileSync(state.mobileSync);
@@ -1807,6 +1846,72 @@ export default function ControlCenter({
     });
   };
 
+  const createPartnershipProfile = (draft: PartnershipProfileDraft) => {
+    const name = draft.name.trim();
+    const market = draft.market.trim();
+    const address = draft.address.trim();
+    const manager = draft.manager.trim();
+    if (!name || !market || !address || !manager) {
+      addAudit('Partnership profile waiting', 'Partnership name, market, address, and account owner are required.');
+      return false;
+    }
+
+    const baseId = profileIdFromName(name);
+    const profileId = communities.some((community) => community.id === baseId)
+      ? `${baseId}-${Date.now().toString().slice(-4)}`
+      : baseId;
+    const homes = Math.max(0, Math.round(Number(draft.homes) || 0));
+    const occupied = Math.max(0, Math.round(Number(draft.occupied) || homes));
+    const plusMembers = Math.max(0, Math.round(Number(draft.plusMembers) || 0));
+    const servicePenetration = Math.max(0, Math.min(100, Number(draft.servicePenetration) || 0));
+    const netIncome = Math.max(0, Number(draft.netIncome) || 0);
+    const profile: Community = {
+      address,
+      homes,
+      id: profileId,
+      manager,
+      market,
+      name,
+      netIncome,
+      occupied,
+      plusMembers,
+      servicePenetration,
+      statementStatus: 'Draft',
+    };
+
+    setCommunities((current) => [profile, ...current]);
+    addAudit('Partnership profile', `${name} added to FLAIRO CRM setup with statement defaults in Draft.`);
+    void persistAction('create_partnership_profile', {
+      address,
+      homes,
+      manager,
+      market,
+      name,
+      netIncome,
+      occupied,
+      plusMembers,
+      profileId,
+      servicePenetration,
+    });
+    return true;
+  };
+
+  const saveCrmAccountSettings = (settings: CrmAccountSettings) => {
+    setCrmAccountSettings(settings);
+    addAudit('CRM account settings', 'Platform account defaults saved for partnerships, billing, onboarding, and mobile catalog control.');
+    void persistAction('update_crm_account_settings', {
+      accountMode: settings.accountMode,
+      accountingEmail: settings.accountingEmail,
+      billingContact: settings.billingContact,
+      defaultPaymentTerms: settings.defaultPaymentTerms,
+      documentRequirements: settings.documentRequirements,
+      mobileCatalogOwner: settings.mobileCatalogOwner,
+      statementApprover: settings.statementApprover,
+      supportRouting: settings.supportRouting,
+      vendorOnboardingOwner: settings.vendorOnboardingOwner,
+    });
+  };
+
   const adminAdjustPlumePoints = (draft: RewardAdjustmentDraft) => {
     const points = Math.round(Number(draft.points));
     if (!draft.resident.trim() || !points || !draft.communityId) {
@@ -2137,7 +2242,15 @@ export default function ControlCenter({
         )}
 
         {activeModule === 'settings' && (
-          <SettingsModule audit={audit} services={services} vendors={vendors} />
+          <SettingsModule
+            audit={audit}
+            communities={communities}
+            createPartnershipProfile={createPartnershipProfile}
+            crmAccountSettings={crmAccountSettings}
+            saveCrmAccountSettings={saveCrmAccountSettings}
+            services={services}
+            vendors={vendors}
+          />
         )}
       </section>
     </main>
@@ -4856,47 +4969,235 @@ function ReportsModule({
 
 function SettingsModule({
   audit,
+  communities,
+  createPartnershipProfile,
+  crmAccountSettings,
+  saveCrmAccountSettings,
   services,
   vendors,
 }: {
   audit: AuditEntry[];
+  communities: Community[];
+  createPartnershipProfile: (draft: PartnershipProfileDraft) => boolean;
+  crmAccountSettings: CrmAccountSettings;
+  saveCrmAccountSettings: (settings: CrmAccountSettings) => void;
   services: Service[];
   vendors: Vendor[];
 }) {
-  return (
-    <section className="split-grid">
-      <div className="table-panel">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Integration model</p>
-            <h2>Systems this control center governs</h2>
-          </div>
-        </div>
-        <div className="rule-list">
-          <InfoTile label="Resident mobile application" value="Service catalog, booking options, PLUS pricing, Plume Point rules, and resident request intake" />
-          <InfoTile label="Vendor portal" value="Onboarding, document upload, job board access, claim lock, schedule confirmation" />
-          <InfoTile label="FLAIRO CRM" value={`${vendors.length} vendors, ${services.length} service lines, community reporting, audit history`} />
-          <InfoTile label="Bluevine invoice queue" value="Job fee records roll into one monthly vendor statement for Bluevine invoice processing" />
-          <InfoTile label="Compliance storage" value="Insurance, business license, W-9, review status, expiration dates" />
-        </div>
-      </div>
+  const [auditExpanded, setAuditExpanded] = useState(false);
+  const [profileDraft, setProfileDraft] = useState<PartnershipProfileDraft>({
+    address: '',
+    homes: '',
+    manager: 'RISE Residential Management',
+    market: '',
+    name: '',
+    netIncome: '',
+    occupied: '',
+    plusMembers: '',
+    servicePenetration: '',
+  });
+  const [settingsDraft, setSettingsDraft] = useState<CrmAccountSettings>(crmAccountSettings);
 
-      <div className="table-panel">
+  useEffect(() => {
+    const timer = setTimeout(() => setSettingsDraft(crmAccountSettings), 0);
+    return () => clearTimeout(timer);
+  }, [crmAccountSettings]);
+
+  const latestAudit = audit[0];
+  const readyPartnerships = communities.filter((community) => community.statementStatus === 'Ready').length;
+  const updateProfileDraft = (field: keyof PartnershipProfileDraft, value: string) => {
+    setProfileDraft((current) => ({ ...current, [field]: value }));
+  };
+  const updateSettingsDraft = (field: keyof CrmAccountSettings, value: string) => {
+    setSettingsDraft((current) => ({ ...current, [field]: value }));
+  };
+  const submitProfile = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const profileCreated = createPartnershipProfile(profileDraft);
+    if (!profileCreated) return;
+    setProfileDraft({
+      address: '',
+      homes: '',
+      manager: profileDraft.manager || 'RISE Residential Management',
+      market: '',
+      name: '',
+      netIncome: '',
+      occupied: '',
+      plusMembers: '',
+      servicePenetration: '',
+    });
+  };
+
+  return (
+    <section className="settings-stack">
+      <div className="table-panel setup-panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Audit history</p>
-            <h2>Employee actions</h2>
+            <p className="eyebrow">Setup</p>
+            <h2>Partnership and CRM account controls</h2>
+            <p className="section-subtitle">Create partnership profiles and maintain the defaults that drive billing, onboarding, mobile catalog ownership, and support routing.</p>
           </div>
         </div>
-        <div className="activity-list">
-          {audit.map((entry) => (
-            <div className="activity-row" key={entry.id}>
-              <span>{entry.time}</span>
-              <strong>{entry.action}</strong>
-              <p>{entry.detail}</p>
+
+        <div className="setup-overview-grid">
+          <InfoTile label="Partnership profiles" value={`${communities.length} active / ${readyPartnerships} ready for statements`} />
+          <InfoTile label="Vendor CRM" value={`${vendors.length} vendors / ${services.length} service lines`} />
+          <InfoTile label="Default terms" value={crmAccountSettings.defaultPaymentTerms} />
+          <InfoTile label="Platform mode" value={crmAccountSettings.accountMode} />
+        </div>
+
+        <div className="setup-control-grid">
+          <form className="setup-form" onSubmit={submitProfile}>
+            <div>
+              <p className="eyebrow">Partnership profiles</p>
+              <h3>Add profile</h3>
+            </div>
+            <div className="form-grid two">
+              <label>
+                Partnership name
+                <input value={profileDraft.name} onChange={(event) => updateProfileDraft('name', event.target.value)} placeholder="Community or account name" />
+              </label>
+              <label>
+                Market
+                <input value={profileDraft.market} onChange={(event) => updateProfileDraft('market', event.target.value)} placeholder="City, ST" />
+              </label>
+              <label>
+                Address
+                <input value={profileDraft.address} onChange={(event) => updateProfileDraft('address', event.target.value)} placeholder="Primary property address" />
+              </label>
+              <label>
+                Account owner
+                <input value={profileDraft.manager} onChange={(event) => updateProfileDraft('manager', event.target.value)} placeholder="Ownership or management contact" />
+              </label>
+            </div>
+            <div className="form-grid four">
+              <label>
+                Homes
+                <input inputMode="numeric" value={profileDraft.homes} onChange={(event) => updateProfileDraft('homes', event.target.value)} placeholder="0" />
+              </label>
+              <label>
+                Occupied
+                <input inputMode="numeric" value={profileDraft.occupied} onChange={(event) => updateProfileDraft('occupied', event.target.value)} placeholder="0" />
+              </label>
+              <label>
+                PLUS members
+                <input inputMode="numeric" value={profileDraft.plusMembers} onChange={(event) => updateProfileDraft('plusMembers', event.target.value)} placeholder="0" />
+              </label>
+              <label>
+                Monthly revenue
+                <input inputMode="decimal" value={profileDraft.netIncome} onChange={(event) => updateProfileDraft('netIncome', event.target.value)} placeholder="0" />
+              </label>
+            </div>
+            <label>
+              Service penetration
+              <input inputMode="decimal" value={profileDraft.servicePenetration} onChange={(event) => updateProfileDraft('servicePenetration', event.target.value)} placeholder="0 to 100" />
+            </label>
+            <button type="submit">Add partnership profile</button>
+          </form>
+
+          <form
+            className="setup-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveCrmAccountSettings(settingsDraft);
+            }}
+          >
+            <div>
+              <p className="eyebrow">CRM account settings</p>
+              <h3>Platform defaults</h3>
+            </div>
+            <div className="form-grid two">
+              <label>
+                Billing contact
+                <input value={settingsDraft.billingContact} onChange={(event) => updateSettingsDraft('billingContact', event.target.value)} />
+              </label>
+              <label>
+                Accounting email
+                <input value={settingsDraft.accountingEmail} onChange={(event) => updateSettingsDraft('accountingEmail', event.target.value)} />
+              </label>
+              <label>
+                Payment terms
+                <select value={settingsDraft.defaultPaymentTerms} onChange={(event) => updateSettingsDraft('defaultPaymentTerms', event.target.value)}>
+                  <option>Due on receipt</option>
+                  <option>Net 7</option>
+                  <option>Net 15</option>
+                  <option>Net 30</option>
+                </select>
+              </label>
+              <label>
+                Platform mode
+                <select value={settingsDraft.accountMode} onChange={(event) => updateSettingsDraft('accountMode', event.target.value)}>
+                  <option>Live operations</option>
+                  <option>Setup mode</option>
+                  <option>Paused intake</option>
+                </select>
+              </label>
+              <label>
+                Statement approver
+                <input value={settingsDraft.statementApprover} onChange={(event) => updateSettingsDraft('statementApprover', event.target.value)} />
+              </label>
+              <label>
+                Vendor onboarding owner
+                <input value={settingsDraft.vendorOnboardingOwner} onChange={(event) => updateSettingsDraft('vendorOnboardingOwner', event.target.value)} />
+              </label>
+              <label>
+                Mobile catalog owner
+                <input value={settingsDraft.mobileCatalogOwner} onChange={(event) => updateSettingsDraft('mobileCatalogOwner', event.target.value)} />
+              </label>
+              <label>
+                Support routing
+                <input value={settingsDraft.supportRouting} onChange={(event) => updateSettingsDraft('supportRouting', event.target.value)} />
+              </label>
+            </div>
+            <label>
+              Required compliance documents
+              <textarea rows={3} value={settingsDraft.documentRequirements} onChange={(event) => updateSettingsDraft('documentRequirements', event.target.value)} />
+            </label>
+            <button type="submit">Save account settings</button>
+          </form>
+        </div>
+
+        <div className="partnership-profile-list" aria-label="Active partnership profiles">
+          {communities.map((community) => (
+            <div className="partnership-profile-row" key={community.id}>
+              <span>
+                {community.name}
+                <em>{community.market} / {community.manager}</em>
+              </span>
+              <strong>{community.statementStatus}</strong>
+              <span>{community.plusMembers} PLUS</span>
+              <span>{dollars(community.netIncome)}</span>
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="table-panel audit-panel">
+        <button
+          aria-controls="settings-audit-history"
+          aria-expanded={auditExpanded}
+          className="audit-toggle"
+          onClick={() => setAuditExpanded((current) => !current)}
+          type="button"
+        >
+          <span>
+            <span className="eyebrow">Audit history</span>
+            <strong>Employee actions</strong>
+            <em>{latestAudit ? `Latest: ${latestAudit.action} / ${latestAudit.time}` : 'No employee actions recorded'}</em>
+          </span>
+          <b>{auditExpanded ? 'Hide history' : `Show ${audit.length} actions`}</b>
+        </button>
+        {auditExpanded && (
+          <div className="activity-list" id="settings-audit-history">
+            {audit.map((entry) => (
+              <div className="activity-row" key={entry.id}>
+                <span>{entry.time}</span>
+                <strong>{entry.action}</strong>
+                <p>{entry.detail}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -5341,6 +5642,15 @@ function vendorIdFromName(name: string) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   return slug || `vendor-${Date.now()}`;
+}
+
+function profileIdFromName(name: string) {
+  const slug = name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || `partnership-${Date.now()}`;
 }
 
 function sortVendorsForBoard(a: Vendor, b: Vendor) {

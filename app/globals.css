@@ -638,6 +638,140 @@ a:focus-visible {
   gap: 18px;
 }
 
+.settings-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.setup-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.setup-overview-grid,
+.setup-control-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.setup-overview-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.setup-control-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+}
+
+.setup-form {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  border: 1px solid rgba(212, 175, 55, 0.2);
+  border-radius: 8px;
+  background: rgba(212, 175, 55, 0.045);
+  padding: 16px;
+}
+
+.setup-form h3 {
+  margin: 4px 0 0;
+  color: #ffffff;
+  font-size: 18px;
+}
+
+.setup-form button {
+  justify-self: start;
+}
+
+.partnership-profile-list {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+}
+
+.partnership-profile-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(88px, 0.25fr) minmax(90px, 0.25fr) minmax(90px, 0.25fr);
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  padding: 12px 14px;
+}
+
+.partnership-profile-row:first-child {
+  border-top: 0;
+}
+
+.partnership-profile-row strong {
+  color: var(--gold);
+}
+
+.partnership-profile-row span:first-child {
+  color: #ffffff;
+  font-weight: 850;
+}
+
+.partnership-profile-row em {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.audit-panel {
+  padding: 0;
+}
+
+.audit-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: transparent;
+  color: inherit;
+  padding: 20px;
+  text-align: left;
+}
+
+.audit-toggle:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.audit-toggle > span {
+  display: grid;
+  gap: 5px;
+}
+
+.audit-toggle strong {
+  color: #ffffff;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 24px;
+  font-weight: 500;
+}
+
+.audit-toggle em {
+  color: var(--muted);
+  font-style: normal;
+}
+
+.audit-toggle b {
+  flex: 0 0 auto;
+  border: 1px solid rgba(247, 134, 199, 0.35);
+  border-radius: 8px;
+  color: var(--pink);
+  font-size: 13px;
+  padding: 9px 11px;
+}
+
+.audit-panel .activity-list {
+  border-top: 1px solid var(--line-soft);
+  padding: 0 20px 20px;
+}
+
 .vendor-month-panel {
   overflow: hidden;
 }
@@ -1300,6 +1434,10 @@ input::placeholder {
 
 .form-grid.three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.form-grid.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .check-control {
@@ -2246,7 +2384,9 @@ input::placeholder {
   .statement-grid,
   .month-close-grid,
   .reporting-grid,
-  .reward-control-grid {
+  .reward-control-grid,
+  .setup-overview-grid,
+  .setup-control-grid {
     grid-template-columns: 1fr;
   }
 
@@ -2301,6 +2441,7 @@ input::placeholder {
   .service-check-grid,
   .form-grid.two,
   .form-grid.three,
+  .form-grid.four,
   .vendor-month-row,
   .vendor-profile-grid,
   .profile-summary-grid,
@@ -2310,6 +2451,7 @@ input::placeholder {
   .vendor-statement-job,
   .open-statement-facts,
   .open-statement-item,
+  .partnership-profile-row,
   .vendor-month-panel.invoice-mode .vendor-month-row,
   .accounting-note-grid,
   .drilldown-row {
@@ -2331,6 +2473,15 @@ input::placeholder {
   .open-statement-head strong,
   .open-statement-item strong {
     text-align: left;
+  }
+
+  .audit-toggle {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .audit-toggle b {
+    justify-self: start;
   }
 
   .integration-strip {

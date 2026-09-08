@@ -119,6 +119,18 @@ type RewardSettingsSeed = {
   avgCxRating: number;
 };
 
+type CrmAccountSettingsSeed = {
+  accountMode: string;
+  accountingEmail: string;
+  billingContact: string;
+  defaultPaymentTerms: string;
+  documentRequirements: string;
+  mobileCatalogOwner: string;
+  statementApprover: string;
+  supportRouting: string;
+  vendorOnboardingOwner: string;
+};
+
 type InvoiceSeed = {
   id: string;
   jobId: string;
@@ -571,6 +583,18 @@ const rewardSettings: RewardSettingsSeed = {
   surveyResponseRatePercent: 38,
 };
 
+const crmAccountSettings: CrmAccountSettingsSeed = {
+  accountMode: 'Live operations',
+  accountingEmail: 'accounting@flairo.org',
+  billingContact: 'FLAIRO Admin',
+  defaultPaymentTerms: 'Net 7',
+  documentRequirements: 'Insurance, business license, W-9, contract',
+  mobileCatalogOwner: 'Resident Experience',
+  statementApprover: 'Partnership Accounting',
+  supportRouting: 'info@flairo.org',
+  vendorOnboardingOwner: 'Vendor Operations',
+};
+
 const invoices: InvoiceSeed[] = [
   {
     id: 'INV-Q-2208',
@@ -768,6 +792,14 @@ export async function POST(request: Request) {
         await upsertVendor(payload);
         stageMobileChange = true;
         break;
+      case 'create_partnership_profile':
+        await createPartnershipProfile(payload);
+        stageMobileChange = true;
+        break;
+      case 'update_crm_account_settings':
+        await updateCrmAccountSettings(payload);
+        stageMobileChange = true;
+        break;
       case 'approve_vendor':
         await approveVendor(textPayload(payload, 'vendorId'));
         stageMobileChange = true;
@@ -881,6 +913,7 @@ async function initializeDatabase(db: D1Database) {
     db.prepare('CREATE TABLE IF NOT EXISTS job_orders (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, vendor_id TEXT, task_status TEXT NOT NULL, service_date TEXT, schedule_confirmed_at TEXT, vendor_confirmed_at TEXT, claimed_at TEXT, schedule_due_at TEXT, payment_consult_status TEXT NOT NULL DEFAULT "Not started", resident_paid_vendor INTEGER NOT NULL DEFAULT 0, vendor_payment_confirmed INTEGER NOT NULL DEFAULT 0, resident_payment_confirmed INTEGER NOT NULL DEFAULT 0, amount_paid_cents INTEGER, payment_date TEXT, receipt_number TEXT, payment_inquiry_status TEXT, service_amount_cents INTEGER NOT NULL, flairo_fee_cents INTEGER NOT NULL, points INTEGER NOT NULL DEFAULT 0, invoice_trigger_status TEXT NOT NULL DEFAULT "Waiting", created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS reward_ledger_entries (id TEXT PRIMARY KEY, resident_name TEXT NOT NULL, community_id TEXT NOT NULL, request_id TEXT, entry_type TEXT NOT NULL, status TEXT NOT NULL, points INTEGER NOT NULL, dollar_value_cents INTEGER NOT NULL DEFAULT 0, expires_at TEXT, plus_member INTEGER NOT NULL DEFAULT 1, alert_queued INTEGER NOT NULL DEFAULT 0, redeemed_in_expiration_window INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL, created_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS reward_program_settings (id TEXT PRIMARY KEY, point_value_cents INTEGER NOT NULL DEFAULT 1, redemption_cap_percent REAL NOT NULL DEFAULT 10, plus_membership_monthly_cents INTEGER NOT NULL DEFAULT 500, plus_only_accrual INTEGER NOT NULL DEFAULT 1, minimum_gold_balance INTEGER NOT NULL DEFAULT 500, expiration_months INTEGER NOT NULL DEFAULT 12, expiration_reminder_days INTEGER NOT NULL DEFAULT 7, adoption_index_previous_month INTEGER NOT NULL DEFAULT 69, registration_growth_percent REAL NOT NULL DEFAULT 12, activation_rate_percent REAL NOT NULL DEFAULT 46, first_service_conversion_percent REAL NOT NULL DEFAULT 28, active_30_day_rate_percent REAL NOT NULL DEFAULT 37, repeat_use_rate_percent REAL NOT NULL DEFAULT 31, survey_response_rate_percent REAL NOT NULL DEFAULT 38, avg_cx_rating REAL NOT NULL DEFAULT 4.6, updated_at TEXT NOT NULL)'),
+    db.prepare('CREATE TABLE IF NOT EXISTS crm_account_settings (id TEXT PRIMARY KEY, billing_contact TEXT NOT NULL DEFAULT "", accounting_email TEXT NOT NULL DEFAULT "", default_payment_terms TEXT NOT NULL DEFAULT "Net 7", statement_approver TEXT NOT NULL DEFAULT "", document_requirements TEXT NOT NULL DEFAULT "", vendor_onboarding_owner TEXT NOT NULL DEFAULT "", mobile_catalog_owner TEXT NOT NULL DEFAULT "", support_routing TEXT NOT NULL DEFAULT "", account_mode TEXT NOT NULL DEFAULT "Live operations", updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS invoice_triggers (id TEXT PRIMARY KEY, job_order_id TEXT NOT NULL, vendor_id TEXT NOT NULL, amount_cents INTEGER NOT NULL, billing_period TEXT, status TEXT NOT NULL, bluevine_reference TEXT, due_date TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS mobile_sync_state (id TEXT PRIMARY KEY, connection_status TEXT NOT NULL, last_checked_at TEXT NOT NULL, last_push_at TEXT, pending_changes INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0, last_push_summary TEXT NOT NULL DEFAULT "No mobile app push yet", updated_at TEXT NOT NULL)'),
     db.prepare('CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, subject TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL)'),
@@ -893,6 +926,7 @@ async function initializeDatabase(db: D1Database) {
     db.prepare('CREATE INDEX IF NOT EXISTS idx_rewards_status ON reward_ledger_entries (status)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_invoice_triggers_billing ON invoice_triggers (vendor_id, billing_period, status)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_reward_program_settings_updated_at ON reward_program_settings (updated_at)'),
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_crm_account_settings_updated_at ON crm_account_settings (updated_at)'),
     db.prepare('CREATE INDEX IF NOT EXISTS idx_mobile_sync_updated_at ON mobile_sync_state (updated_at)'),
   ]);
   await ensureColumn(db, 'job_orders', 'claimed_at', 'TEXT');
@@ -923,6 +957,7 @@ async function initializeDatabase(db: D1Database) {
     .run();
   await ensureMobileSyncState(db);
   await ensureRewardSettings(db);
+  await ensureCrmAccountSettings(db);
 }
 
 async function ensureColumn(db: D1Database, tableName: string, columnName: string, definition: string) {
@@ -1035,6 +1070,7 @@ async function readState(db: D1Database) {
   const auditRows = await db.prepare('SELECT * FROM audit_events ORDER BY created_at DESC, id DESC LIMIT 20').all();
   const mobileSyncRow = await db.prepare('SELECT * FROM mobile_sync_state WHERE id = ?').bind('default').first<Record<string, unknown>>();
   const rewardSettingsRow = await db.prepare('SELECT * FROM reward_program_settings WHERE id = ?').bind('default').first<Record<string, unknown>>();
+  const crmAccountSettingsRow = await db.prepare('SELECT * FROM crm_account_settings WHERE id = ?').bind('default').first<Record<string, unknown>>();
   const liveTableHealth = await readSupabaseLiveTableHealth();
   const pendingMobileChanges = Number(mobileSyncRow?.pending_changes ?? 0);
   const documentCounts = buildVendorDocumentCountMap(vendorDocumentRows.results);
@@ -1137,6 +1173,17 @@ async function readState(db: D1Database) {
       repeatUseRatePercent: Number(rewardSettingsRow?.repeat_use_rate_percent ?? rewardSettings.repeatUseRatePercent),
       surveyResponseRatePercent: Number(rewardSettingsRow?.survey_response_rate_percent ?? rewardSettings.surveyResponseRatePercent),
     },
+    crmAccountSettings: {
+      accountMode: String(crmAccountSettingsRow?.account_mode ?? crmAccountSettings.accountMode),
+      accountingEmail: String(crmAccountSettingsRow?.accounting_email ?? crmAccountSettings.accountingEmail),
+      billingContact: String(crmAccountSettingsRow?.billing_contact ?? crmAccountSettings.billingContact),
+      defaultPaymentTerms: String(crmAccountSettingsRow?.default_payment_terms ?? crmAccountSettings.defaultPaymentTerms),
+      documentRequirements: String(crmAccountSettingsRow?.document_requirements ?? crmAccountSettings.documentRequirements),
+      mobileCatalogOwner: String(crmAccountSettingsRow?.mobile_catalog_owner ?? crmAccountSettings.mobileCatalogOwner),
+      statementApprover: String(crmAccountSettingsRow?.statement_approver ?? crmAccountSettings.statementApprover),
+      supportRouting: String(crmAccountSettingsRow?.support_routing ?? crmAccountSettings.supportRouting),
+      vendorOnboardingOwner: String(crmAccountSettingsRow?.vendor_onboarding_owner ?? crmAccountSettings.vendorOnboardingOwner),
+    },
     services: serviceRows.results.map((row) => ({
       category: String(row.category),
       id: String(row.id),
@@ -1223,6 +1270,25 @@ async function ensureRewardSettings(db: D1Database) {
     .run();
 }
 
+async function ensureCrmAccountSettings(db: D1Database) {
+  const stamp = now();
+  await db.prepare('INSERT OR IGNORE INTO crm_account_settings (id, billing_contact, accounting_email, default_payment_terms, statement_approver, document_requirements, vendor_onboarding_owner, mobile_catalog_owner, support_routing, account_mode, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(
+      'default',
+      crmAccountSettings.billingContact,
+      crmAccountSettings.accountingEmail,
+      crmAccountSettings.defaultPaymentTerms,
+      crmAccountSettings.statementApprover,
+      crmAccountSettings.documentRequirements,
+      crmAccountSettings.vendorOnboardingOwner,
+      crmAccountSettings.mobileCatalogOwner,
+      crmAccountSettings.supportRouting,
+      crmAccountSettings.accountMode,
+      stamp,
+    )
+    .run();
+}
+
 async function touchMobileConnection(db: D1Database) {
   const row = await db.prepare('SELECT pending_changes FROM mobile_sync_state WHERE id = ?')
     .bind('default')
@@ -1251,7 +1317,7 @@ async function pushMobileUpdate() {
       'Live app bridge online • mobile app current',
       stamp,
       stamp,
-      'Manual push sent staged catalog, job-board, rewards, vendor, and reporting updates.',
+      'Manual push sent staged catalog, job-board, rewards, vendor, CRM account, and reporting updates.',
       stamp,
       'default',
     )
@@ -1300,6 +1366,73 @@ async function upsertVendor(payload: ActionPayload) {
   }
 
   await logEvent('Vendor profile', vendorId, `${name} ${existing ? 'updated' : 'created'} with ${services.length} eligible service line${services.length === 1 ? '' : 's'}.`);
+}
+
+async function createPartnershipProfile(payload: ActionPayload) {
+  const name = textPayload(payload, 'name')?.trim();
+  const market = textPayload(payload, 'market')?.trim();
+  const address = textPayload(payload, 'address')?.trim();
+  const manager = textPayload(payload, 'manager')?.trim();
+  if (!name || !market || !address || !manager) return;
+
+  const stamp = now();
+  const profileId = textPayload(payload, 'profileId')?.trim() || profileIdFromName(name);
+  const homes = Math.max(0, Math.round(numericPayload(payload, 'homes', 0)));
+  const occupied = Math.max(0, Math.round(numericPayload(payload, 'occupied', homes)));
+  const plusMembers = Math.max(0, Math.round(numericPayload(payload, 'plusMembers', 0)));
+  const servicePenetration = Math.max(0, Math.min(100, numericPayload(payload, 'servicePenetration', 0)));
+  const netIncomeCents = cents(Math.max(0, numericPayload(payload, 'netIncome', 0)));
+
+  await env.DB.prepare('INSERT OR IGNORE INTO communities (id, name, market, address, property_manager, homes, occupied_homes, plus_enabled, plus_members, service_penetration, net_income_cents, statement_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(profileId, name, market, address, manager, homes, occupied, 1, plusMembers, servicePenetration, netIncomeCents, 'Draft', stamp, stamp)
+    .run();
+  await logEvent('Partnership profile', profileId, `${name} added to FLAIRO CRM setup with statement defaults in Draft.`);
+}
+
+async function updateCrmAccountSettings(payload: ActionPayload) {
+  const stamp = now();
+  const settings = {
+    accountMode: textPayload(payload, 'accountMode')?.trim() || crmAccountSettings.accountMode,
+    accountingEmail: textPayload(payload, 'accountingEmail')?.trim() || crmAccountSettings.accountingEmail,
+    billingContact: textPayload(payload, 'billingContact')?.trim() || crmAccountSettings.billingContact,
+    defaultPaymentTerms: textPayload(payload, 'defaultPaymentTerms')?.trim() || crmAccountSettings.defaultPaymentTerms,
+    documentRequirements: textPayload(payload, 'documentRequirements')?.trim() || crmAccountSettings.documentRequirements,
+    mobileCatalogOwner: textPayload(payload, 'mobileCatalogOwner')?.trim() || crmAccountSettings.mobileCatalogOwner,
+    statementApprover: textPayload(payload, 'statementApprover')?.trim() || crmAccountSettings.statementApprover,
+    supportRouting: textPayload(payload, 'supportRouting')?.trim() || crmAccountSettings.supportRouting,
+    vendorOnboardingOwner: textPayload(payload, 'vendorOnboardingOwner')?.trim() || crmAccountSettings.vendorOnboardingOwner,
+  };
+
+  await env.DB.prepare(`
+    INSERT INTO crm_account_settings (id, billing_contact, accounting_email, default_payment_terms, statement_approver, document_requirements, vendor_onboarding_owner, mobile_catalog_owner, support_routing, account_mode, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      billing_contact = excluded.billing_contact,
+      accounting_email = excluded.accounting_email,
+      default_payment_terms = excluded.default_payment_terms,
+      statement_approver = excluded.statement_approver,
+      document_requirements = excluded.document_requirements,
+      vendor_onboarding_owner = excluded.vendor_onboarding_owner,
+      mobile_catalog_owner = excluded.mobile_catalog_owner,
+      support_routing = excluded.support_routing,
+      account_mode = excluded.account_mode,
+      updated_at = excluded.updated_at
+  `)
+    .bind(
+      'default',
+      settings.billingContact,
+      settings.accountingEmail,
+      settings.defaultPaymentTerms,
+      settings.statementApprover,
+      settings.documentRequirements,
+      settings.vendorOnboardingOwner,
+      settings.mobileCatalogOwner,
+      settings.supportRouting,
+      settings.accountMode,
+      stamp,
+    )
+    .run();
+  await logEvent('CRM account settings', 'crm-account', 'Platform account defaults saved for partnerships, billing, onboarding, and mobile catalog control.');
 }
 
 async function recordDocumentUpload(payload: ActionPayload) {
@@ -2012,6 +2145,15 @@ function vendorIdFromName(name: string) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   return slug || `vendor-${Date.now()}`;
+}
+
+function profileIdFromName(name: string) {
+  const slug = name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || `partnership-${Date.now()}`;
 }
 
 function sortVendorsForBoard(a: VendorSeed, b: VendorSeed) {
